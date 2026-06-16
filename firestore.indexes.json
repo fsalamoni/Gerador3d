@@ -1,10 +1,4 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "jobs",
-      "queryScope": "COLLECTION",
-      "fields": [{ "fieldPath": "created_at", "order": "DESCENDING" }]
-    }
-  ],
+  "indexes": [],
   "fieldOverrides": []
 }
