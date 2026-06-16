@@ -49,7 +49,7 @@ export const FUNCTIONS_REGION =
 if (IS_FIREBASE) {
   app = initializeApp(firebaseConfig)
   authInstance = getAuth(app)
-  dbInstance = getFirestore(app)
+  dbInstance = getFirestore(app, import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)');
   storageInstance = getStorage(app)
   functionsInstance = getFunctions(app, FUNCTIONS_REGION)
 

@@ -8,6 +8,45 @@ pronto para uso em RPG em mesas virtuais (VTT) via **OBS**.
 > and **animate the avatar in real time from the webcam**, ready for tabletop
 > RPG on virtual tabletops via **OBS**.
 
+---
+
+## Funcionalidades Desenvolvidas
+
+A plataforma foi construída do zero, utilizando uma arquitetura moderna e escalável com **React, TypeScript, Vite e Firebase**. O deploy é automatizado via **GitHub Actions**.
+
+- **✨ Geração de Modelos 3D**:
+  - Suporte a múltiplos provedores de geração (arquitetura "Bring Your Own Key").
+  - Geração a partir de **texto** ou **imagem**.
+  - Proxy de Cloud Functions para gerenciar as chamadas de API de forma segura e assíncrona, sem expor chaves de API no cliente.
+  - Otimização com `vite-plugin-chunk-split` para melhor performance de carregamento.
+
+- **👤 Estúdio de Avatar**:
+  - Visualizador de modelos 3D (`.glb`, `.vrm`) com controles de câmera.
+  - **Animação facial em tempo real** via webcam, utilizando MediaPipe para detecção de face e Kalidokit para rigging.
+  - Interface preparada para captura de tela com fundo transparente, ideal para streaming em softwares como OBS.
+
+- **⚙️ Gerenciamento e Administração**:
+  - Autenticação de usuários com Firebase (Email/Senha e Google).
+  - Galeria de modelos 3D gerados por usuário, com persistência no Firebase Storage.
+  - **Painel de Admin** com estatísticas de uso da plataforma (total de jobs, jobs por provedor, etc.).
+  - **Painel de Analytics** individual para cada usuário.
+  - Interface bilíngue (Português/Inglês).
+
+- **☁️ Infraestrutura e Banco de Dados**:
+  - O projeto utiliza um banco de dados **Firestore dedicado (`gerador3d`)** dentro do projeto Firebase `antonov-82411`, garantindo total isolamento de dados de outras aplicações.
+  - Regras de segurança robustas para Firestore e Storage.
+
+## Próximos Passos (O Que Falta Desenvolver)
+
+A base da plataforma está sólida e funcional, mas há diversas oportunidades de expansão:
+
+- **Novos Provedores**: Integrar mais APIs de geração 3D (ex: Luma AI, CSM, etc.) para dar mais opções aos usuários.
+- **Editor de VRM**: Adicionar um editor no Estúdio para ajustar detalhes do avatar (expressões, materiais, etc.) e salvar as alterações.
+- **Animação Corporal**: Expandir o tracking para incluir corpo inteiro (requer modelos VRM com rigging completo).
+- **Melhorias de UI/UX**: Refinar a interface, adicionar mais feedback visual durante a geração e melhorar a experiência de onboarding.
+- **Analytics Avançado**: Detalhar ainda mais as métricas no painel de Admin e no painel do usuário.
+- **Testes Automatizados**: Implementar uma suíte de testes (unitários, integração, e2e) para garantir a estabilidade do código.
+
 A interface é **bilíngue (PT-BR / EN)**. Cada usuário cadastra seus **próprios
 provedores de IA** (BYOK) e escolhe os **modelos** por tarefa.
 

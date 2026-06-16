@@ -8,9 +8,12 @@
  *
  * All writes are best-effort: a failure here must never break a generation.
  */
-import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldValue } from 'firebase-admin/firestore';
+import { Firestore } from '@google-cloud/firestore';
 
-const STATS_PATH = 'platform/stats'
+const db = new Firestore({ databaseId: 'gerador3d' });
+
+const STATS_PATH = 'platform/stats';
 
 /** Increment counters when a new job is created. */
 export async function bumpJobCreated(
@@ -18,7 +21,7 @@ export async function bumpJobCreated(
   capability: string,
 ): Promise<void> {
   try {
-    await getFirestore()
+    await db
       .doc(STATS_PATH)
       .set(
         {
@@ -28,7 +31,7 @@ export async function bumpJobCreated(
           updated_at: new Date().toISOString(),
         },
         { merge: true },
-      )
+      );
   } catch {
     // Non-critical analytics write; ignore.
   }
@@ -37,7 +40,7 @@ export async function bumpJobCreated(
 /** Increment the status counter when a job reaches a terminal state. */
 export async function bumpJobTerminal(status: string): Promise<void> {
   try {
-    await getFirestore()
+    await db
       .doc(STATS_PATH)
       .set(
         {
@@ -45,7 +48,7 @@ export async function bumpJobTerminal(status: string): Promise<void> {
           updated_at: new Date().toISOString(),
         },
         { merge: true },
-      )
+      );
   } catch {
     // Non-critical analytics write; ignore.
   }

@@ -12,24 +12,27 @@
  *  - pollJob3d  : advances one provider poll, persists assets on success and
  *                 returns the updated job (the client polls this).
  */
-import { setGlobalOptions } from 'firebase-functions/v2'
-import { HttpsError, onCall } from 'firebase-functions/v2/https'
-import { initializeApp } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
-import { meshyDispatch, meshyPoll, type TaskKey } from './meshy.js'
-import { persistAsset } from './storage.js'
-import { bumpJobCreated, bumpJobTerminal } from './stats.js'
+import { setGlobalOptions } from 'firebase-functions/v2';
+import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { initializeApp } from 'firebase-admin/app';
+import { Firestore } from '@google-cloud/firestore';
+import { meshyDispatch, meshyPoll, type TaskKey } from './meshy.js';
+import { persistAsset } from './storage.js';
+import { bumpJobCreated, bumpJobTerminal } from './stats.js';
 
-initializeApp()
+// Note: In a multi-database environment, we must instantiate a client from
+// @google-cloud/firestore directly. It automatically picks up credentials
+// and project ID from the runtime environment.
+const db = new Firestore({ databaseId: 'gerador3d' });
+
+initializeApp();
 
 setGlobalOptions({
   region: 'us-central1',
   maxInstances: 10,
   memory: '512MiB',
   timeoutSeconds: 120,
-})
-
-const db = getFirestore()
+});
 
 const TERMINAL = new Set(['succeeded', 'failed', 'canceled'])
 
