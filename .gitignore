@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+frontend/dist/
+functions/lib/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+*serviceAccount*.json
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
+
+# TypeScript incremental build cache
+*.tsbuildinfo

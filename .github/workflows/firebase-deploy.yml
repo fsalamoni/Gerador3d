@@ -1,0 +1,85 @@
+name: Deploy to Firebase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ── Frontend ──────────────────────────────────────────────────────────
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+          VITE_ADMIN_EMAIL: ${{ secrets.VITE_ADMIN_EMAIL }}
+        run: npm run build
+
+      # ── Functions ─────────────────────────────────────────────────────────
+      - name: Install functions deps
+        working-directory: functions
+        run: npm ci
+
+      - name: Build functions
+        working-directory: functions
+        run: npm run build
+
+      # ── Deploy ───────────────────────────────────────────────────────
+      # Steps are split so the public site always goes live (Hosting) even if
+      # Firestore/Storage are not initialized yet, or Functions require the
+      # Blaze plan / extra IAM roles. Non-hosting steps tolerate failure and
+      # surface a clear hint instead of failing the whole pipeline.
+      - name: Write service account
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > "$RUNNER_TEMP/sa.json"
+
+      - name: Deploy Hosting (site goes live)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          FIREBASE_PROJECT: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        run: |
+          npx firebase-tools@latest deploy \
+            --only hosting \
+            --project "${FIREBASE_PROJECT:-antonov3d}" \
+            --non-interactive
+
+      - name: Deploy Firestore & Storage rules/indexes
+        continue-on-error: true
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          FIREBASE_PROJECT: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        run: |
+          npx firebase-tools@latest deploy \
+            --only firestore:rules,firestore:indexes,storage \
+            --project "${FIREBASE_PROJECT:-antonov3d}" \
+            --non-interactive \
+          || echo "::warning::Rules/indexes/storage deploy skipped or failed. Ensure Firestore and Storage are initialized in the Firebase console."
+
+      - name: Deploy Functions (requires Blaze plan)
+        continue-on-error: true
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          FIREBASE_PROJECT: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        run: |
+          npx firebase-tools@latest deploy \
+            --only functions \
+            --project "${FIREBASE_PROJECT:-antonov3d}" \
+            --non-interactive \
+          || echo "::warning::Functions deploy failed. Enable the Blaze (pay-as-you-go) plan and grant the service account Cloud Functions Admin + Service Account User, then re-run."
