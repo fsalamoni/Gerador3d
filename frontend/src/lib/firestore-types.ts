@@ -15,6 +15,7 @@ export type ModelCapability =
   | 'rigging'
   | 'texturing'
   | 'animation'
+  | 'upload'
 
 /** Quality / cost tier of a model. */
 export type ModelTier = 'fast' | 'balanced' | 'premium'

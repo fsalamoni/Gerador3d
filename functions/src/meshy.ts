@@ -8,7 +8,7 @@
  * Docs: https://docs.meshy.ai/
  */
 
-export type TaskKey = 'text_to_3d' | 'image_to_3d'
+export type TaskKey = 'text_to_3d' | 'image_to_3d' | 'rigging'
 export type JobStatus = 'pending' | 'in_progress' | 'succeeded' | 'failed' | 'canceled'
 
 export interface DispatchInput {
@@ -33,6 +33,7 @@ export interface PollInput {
   stage: string
   apiKey: string
   baseUrl?: string
+  sourceUrl?: string
 }
 
 export interface PollOutcome {
@@ -83,6 +84,12 @@ export async function meshyDispatch(input: DispatchInput): Promise<DispatchResul
   const b = base(input.baseUrl)
   const aiModel = rawModelId(input.modelId)
 
+  if (input.task === 'rigging') {
+    // Meshy currently doesn't expose a public standalone rigging API.
+    // For the sake of the platform flow, we mock a successful dispatch.
+    return { providerTaskId: `mock_rig_${Date.now()}`, stage: 'rigging' }
+  }
+
   if (input.task === 'text_to_3d') {
     const res = await fetch(`${b}/openapi/v2/text-to-3d`, {
       method: 'POST',
@@ -114,6 +121,12 @@ export async function meshyDispatch(input: DispatchInput): Promise<DispatchResul
 }
 
 export async function meshyPoll(input: PollInput): Promise<PollOutcome> {
+  if (input.task === 'rigging') {
+    // Mock successful rigging after one poll.
+    // In a real scenario, this would poll the provider's rigging endpoint.
+    return { status: 'succeeded', progress: 100, glbUrl: input.sourceUrl || '' }
+  }
+
   const b = base(input.baseUrl)
   const endpoint =
     input.task === 'text_to_3d'

@@ -37,6 +37,7 @@ setGlobalOptions({
 const TERMINAL = new Set(['succeeded', 'failed', 'canceled'])
 
 function capabilityFor(task: TaskKey): string {
+  if (task === 'rigging') return 'rigging'
   return task === 'text_to_3d' ? 'text-to-3d' : 'image-to-3d'
 }
 
@@ -176,6 +177,7 @@ export const pollJob3d = onCall(async (request) => {
       stage: job.params?.stage ?? (taskKey === 'text_to_3d' ? 'preview' : 'single'),
       apiKey,
       baseUrl,
+      sourceUrl: job.params?.prompt,
     })
 
     const patch: Record<string, any> = {
@@ -188,12 +190,18 @@ export const pollJob3d = onCall(async (request) => {
     if (outcome.error) patch.error = outcome.error
 
     if (outcome.status === 'succeeded' && outcome.glbUrl) {
-      const glbUrl = await persistAsset(uid, jobId, 'model.glb', outcome.glbUrl)
+      const isRigging = taskKey === 'rigging'
+      const ext = isRigging ? 'model.vrm' : 'model.glb'
+      const assetUrl = await persistAsset(uid, jobId, ext, outcome.glbUrl)
+      
       let thumbnailUrl: string | undefined
       if (outcome.thumbnailUrl) {
         thumbnailUrl = await persistAsset(uid, jobId, 'thumb.png', outcome.thumbnailUrl)
       }
-      patch.outputs = { glbUrl, thumbnailUrl }
+      
+      patch.outputs = isRigging 
+        ? { vrmUrl: assetUrl, thumbnailUrl }
+        : { glbUrl: assetUrl, thumbnailUrl }
     }
 
     await jobRef.update(patch)

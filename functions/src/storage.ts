@@ -26,7 +26,7 @@ export async function persistAsset(
   const buffer = Buffer.from(await res.arrayBuffer())
 
   const bucket = getStorage().bucket()
-  const file = bucket.file(`users/${uid}/models/${jobId}/${name}`)
+  const file = bucket.file(`antonov3d/users/${uid}/models/${jobId}/${name}`)
   await file.save(buffer, {
     contentType: contentTypeFor(name),
     resumable: false,

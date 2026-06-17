@@ -37,7 +37,7 @@ export default function StudioPage() {
   useEffect(() => subscribeJobs(setJobs), [])
 
   const generated = useMemo(
-    () => jobs.filter((j) => j.status === 'succeeded' && j.outputs?.glbUrl),
+    () => jobs.filter((j) => j.status === 'succeeded' && (j.outputs?.glbUrl || j.outputs?.vrmUrl)),
     [jobs],
   )
 
@@ -181,23 +181,27 @@ export default function StudioPage() {
                     {t('studio.generatedModels')}
                   </p>
                   <div className="space-y-1.5">
-                    {generated.map((job) => (
-                      <SourceButton
-                        key={job.id}
-                        active={source.kind === 'glb' && source.url === job.outputs?.glbUrl}
-                        label={
-                          (job.params?.prompt as string)?.slice(0, 28) ||
-                          t(`capabilities.${job.task}`)
-                        }
-                        onClick={() =>
-                          setSource({
-                            kind: 'glb',
-                            url: job.outputs!.glbUrl as string,
-                            label: (job.params?.prompt as string) ?? job.id,
-                          })
-                        }
-                      />
-                    ))}
+                    {generated.map((job) => {
+                      const url = job.outputs?.vrmUrl || job.outputs?.glbUrl || ''
+                      const isVrm = Boolean(job.outputs?.vrmUrl) || url.toLowerCase().endsWith('.vrm')
+                      return (
+                        <SourceButton
+                          key={job.id}
+                          active={source.kind === (isVrm ? 'vrm' : 'glb') && source.url === url}
+                          label={
+                            (job.params?.prompt as string)?.slice(0, 28) ||
+                            t(`capabilities.${job.task}`)
+                          }
+                          onClick={() =>
+                            setSource({
+                              kind: isVrm ? 'vrm' : 'glb',
+                              url,
+                              label: (job.params?.prompt as string) ?? job.id,
+                            })
+                          }
+                        />
+                      )
+                    })}
                   </div>
                 </div>
               )}

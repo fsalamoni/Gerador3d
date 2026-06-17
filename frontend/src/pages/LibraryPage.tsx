@@ -1,13 +1,14 @@
 /**
  * LibraryPage — grid of generated 3D models with live status + 3D preview.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, Sparkles, Video, Bone } from 'lucide-react'
+import { Download, Sparkles, Video, Bone, UploadCloud } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { subscribeJobs } from '../lib/jobs-store'
 import type { GenerationJob } from '../lib/firestore-types'
 import ModelViewer from '../components/ModelViewer'
+import { upload3DModel } from '../lib/upload-service'
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-slate-500/20 text-slate-300',
@@ -17,35 +18,109 @@ const STATUS_STYLES: Record<string, string> = {
   canceled: 'bg-slate-500/20 text-slate-400',
 }
 
+import { startGeneration } from '../lib/generation-client'
+
 export default function LibraryPage() {
   const { t } = useTranslation()
   const [jobs, setJobs] = useState<GenerationJob[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => subscribeJobs(setJobs), [])
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    e.target.value = ''
+
+    try {
+      await upload3DModel(file)
+    } catch (err) {
+      console.error('Upload failed:', err)
+      alert(t('library.uploadFailed') || 'Upload failed')
+    }
+  }
+
+  const handleRigging = async (job: GenerationJob) => {
+    if (!job.outputs?.glbUrl) return
+    try {
+      await startGeneration({
+        task: 'rigging',
+        prompt: job.outputs.glbUrl, // pass source URL here
+      })
+      // The generation-client will call the Cloud Function, which creates the job.
+      // We also need to optimistically create the job doc or just wait for the cloud function to create it.
+      // startGeneration creates the job locally in demo mode, but in Firebase mode, the cloud function creates it.
+      // Wait, in GeneratePage we do:
+      // startGeneration() then setActiveJob(...) which updates the UI.
+      // Here we don't need activeJob, it will just appear in the grid!
+    } catch (err) {
+      console.error('Rigging dispatch failed:', err)
+      alert(t('library.riggingFailed') || 'Failed to start rigging')
+    }
+  }
 
   if (jobs.length === 0) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col items-center justify-center py-24 text-center">
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          accept=".glb,.gltf,.vrm" 
+          className="hidden" 
+          onChange={handleFileChange} 
+        />
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-600/15">
           <Sparkles className="h-8 w-8 text-brand-400" />
         </div>
         <h1 className="mt-6 text-2xl font-bold text-white">{t('library.title')}</h1>
         <p className="mt-2 text-sm text-slate-400">{t('library.empty')}</p>
-        <Link
-          to="/app/generate"
-          className="mt-6 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-500"
-        >
-          {t('library.emptyCta')}
-        </Link>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+          <Link
+            to="/app/generate"
+            className="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-500"
+          >
+            {t('library.emptyCta')}
+          </Link>
+          <button
+            onClick={handleUploadClick}
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+          >
+            <UploadCloud className="h-4 w-4" />
+            {t('library.uploadCta') || 'Upload Model'}
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="mx-auto max-w-6xl">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-white">{t('library.title')}</h1>
-        <p className="mt-1 text-sm text-slate-400">{t('library.subtitle')}</p>
+      <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">{t('library.title')}</h1>
+          <p className="mt-1 text-sm text-slate-400">{t('library.subtitle')}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            accept=".glb,.gltf,.vrm" 
+            className="hidden" 
+            onChange={handleFileChange} 
+          />
+          <button
+            onClick={handleUploadClick}
+            className="inline-flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
+          >
+            <UploadCloud className="h-4 w-4" />
+            {t('library.uploadModel') || 'Upload Model'}
+          </button>
+        </div>
       </header>
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -55,7 +130,7 @@ export default function LibraryPage() {
             className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]"
           >
             <div className="relative h-52 bg-slate-900">
-              <ModelViewer url={job.outputs?.glbUrl} autoRotate />
+              <ModelViewer url={job.outputs?.vrmUrl || job.outputs?.glbUrl} autoRotate />
               <span
                 className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                   STATUS_STYLES[job.status] ?? STATUS_STYLES.pending
@@ -81,9 +156,9 @@ export default function LibraryPage() {
 
               {job.status === 'succeeded' && (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {job.outputs?.glbUrl && (
+                  {(job.outputs?.vrmUrl || job.outputs?.glbUrl) && (
                     <a
-                      href={job.outputs.glbUrl}
+                      href={job.outputs.vrmUrl || job.outputs.glbUrl}
                       download
                       className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-200 transition hover:bg-white/5"
                     >
@@ -91,20 +166,24 @@ export default function LibraryPage() {
                       {t('library.download')}
                     </a>
                   )}
-                  <Link
-                    to="/app/studio"
-                    className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-200 transition hover:bg-white/5"
-                  >
-                    <Bone className="h-3.5 w-3.5" />
-                    {t('library.prepareRig')}
-                  </Link>
-                  <Link
-                    to="/app/studio"
-                    className="inline-flex items-center gap-1 rounded-lg bg-brand-600/20 px-2.5 py-1.5 text-xs font-medium text-brand-200 transition hover:bg-brand-600/30"
-                  >
-                    <Video className="h-3.5 w-3.5" />
-                    {t('library.openStudio')}
-                  </Link>
+                  {job.outputs?.glbUrl && !job.outputs?.vrmUrl && (
+                    <button
+                      onClick={() => handleRigging(job)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-slate-200 transition hover:bg-white/5"
+                    >
+                      <Bone className="h-3.5 w-3.5" />
+                      {t('library.prepareRig')}
+                    </button>
+                  )}
+                  {(job.outputs?.vrmUrl || job.outputs?.glbUrl) && (
+                    <Link
+                      to="/app/studio"
+                      className="inline-flex items-center gap-1 rounded-lg bg-brand-600/20 px-2.5 py-1.5 text-xs font-medium text-brand-200 transition hover:bg-brand-600/30"
+                    >
+                      <Video className="h-3.5 w-3.5" />
+                      {t('library.openStudio')}
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
