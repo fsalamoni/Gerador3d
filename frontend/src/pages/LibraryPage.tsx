@@ -3,9 +3,9 @@
  */
 import { useEffect, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, Sparkles, Video, Bone, UploadCloud } from 'lucide-react'
+import { Download, Sparkles, Video, Bone, UploadCloud, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { subscribeJobs } from '../lib/jobs-store'
+import { subscribeJobs, deleteJob } from '../lib/jobs-store'
 import type { GenerationJob } from '../lib/firestore-types'
 import ModelViewer from '../components/ModelViewer'
 import { upload3DModel } from '../lib/upload-service'
@@ -61,6 +61,17 @@ export default function LibraryPage() {
     } catch (err) {
       console.error('Rigging dispatch failed:', err)
       alert(t('library.riggingFailed') || 'Failed to start rigging')
+    }
+  }
+
+  const handleDelete = async (jobId: string) => {
+    if (confirm(t('library.confirmDelete') || 'Tem certeza que deseja excluir este modelo da sua biblioteca?')) {
+      try {
+        await deleteJob(jobId)
+      } catch (err) {
+        console.error('Delete failed:', err)
+        alert(t('library.deleteFailed') || 'Falha ao excluir o modelo.')
+      }
     }
   }
 
@@ -129,16 +140,27 @@ export default function LibraryPage() {
             key={job.id}
             className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]"
           >
-            <div className="relative h-52 bg-slate-900">
+            <div className="group relative h-52 bg-slate-900">
               <ModelViewer url={job.outputs?.vrmUrl || job.outputs?.glbUrl} autoRotate />
-              <span
-                className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  STATUS_STYLES[job.status] ?? STATUS_STYLES.pending
-                }`}
-              >
-                {t(`jobStatus.${job.status}`)}
-                {job.status === 'in_progress' ? ` · ${job.progress}%` : ''}
-              </span>
+              
+              <div className="absolute right-2 top-2 flex flex-col items-end gap-2">
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    STATUS_STYLES[job.status] ?? STATUS_STYLES.pending
+                  }`}
+                >
+                  {t(`jobStatus.${job.status}`)}
+                  {job.status === 'in_progress' ? ` · ${job.progress}%` : ''}
+                </span>
+
+                <button
+                  onClick={() => handleDelete(job.id)}
+                  className="rounded-full bg-red-500/20 p-1.5 text-red-300 opacity-0 transition hover:bg-red-500/40 group-hover:opacity-100"
+                  title={t('library.delete') || 'Excluir'}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="p-4">

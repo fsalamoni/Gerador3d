@@ -14,6 +14,7 @@ import {
   query,
   setDoc,
   updateDoc,
+  deleteDoc,
 } from 'firebase/firestore'
 import { IS_FIREBASE, db } from './firebase'
 import { getCurrentUserId } from './firestore-service'
@@ -78,6 +79,20 @@ export async function updateJob(
   const jobs = readDemoJobs(resolved)
   const next = jobs.map((j) => (j.id === jobId ? { ...j, ...patch } : j))
   writeDemoJobs(resolved, next)
+}
+
+/** Delete a job document. */
+export async function deleteJob(jobId: string, uid?: string): Promise<void> {
+  const resolved = uid ?? getCurrentUserId()
+  if (!resolved) return
+
+  if (IS_FIREBASE && db) {
+    await deleteDoc(doc(db, 'users', resolved, 'jobs', jobId))
+    return
+  }
+
+  const jobs = readDemoJobs(resolved)
+  writeDemoJobs(resolved, jobs.filter((j) => j.id !== jobId))
 }
 
 /** Fetch a single job. */

@@ -58,15 +58,19 @@ export async function upload3DModel(file: File, onProgress?: (progress: number) 
     }
   }
 
+  const outputs: Record<string, string> = {}
+  if (isVrm) {
+    outputs.vrmUrl = downloadUrl
+  } else {
+    outputs.glbUrl = downloadUrl
+  }
+
   // Update job to succeeded with outputs
   const updatedJob: GenerationJob = {
     ...job,
     status: 'succeeded',
     progress: 100,
-    outputs: {
-      glbUrl: isVrm ? undefined : downloadUrl,
-      vrmUrl: isVrm ? downloadUrl : undefined,
-    },
+    outputs,
     updated_at: new Date().toISOString(),
   }
   
@@ -75,7 +79,7 @@ export async function upload3DModel(file: File, onProgress?: (progress: number) 
   await updateJob(jobId, {
     status: 'succeeded',
     progress: 100,
-    outputs: updatedJob.outputs,
+    outputs,
     updated_at: updatedJob.updated_at
   })
 
