@@ -1,10 +1,11 @@
 /**
  * Settings — provider/BYOK configuration and per-task model selection.
  */
-import { Cpu, ListChecks } from 'lucide-react'
+import { Cpu, ListChecks, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import ProvidersSection from '../components/ProvidersSection'
 import TaskModelConfigCard from '../components/TaskModelConfigCard'
+import LocalAIRiggingSection from '../components/LocalAIRiggingSection'
 
 export default function SettingsPage() {
   const { t } = useTranslation()
@@ -41,6 +42,20 @@ export default function SettingsPage() {
           </div>
         </div>
         <TaskModelConfigCard />
+      </section>
+
+      {/* Local AI Explanations */}
+      <section>
+        <div className="mb-4 flex items-center gap-2">
+          <Info className="h-5 w-5 text-emerald-400" />
+          <div>
+            <h2 className="text-base font-semibold text-white">
+              Guia: IA Local & Auto-Rigging
+            </h2>
+            <p className="text-xs text-slate-400">Como funciona o processo de rigging e opções locais/gratuitas.</p>
+          </div>
+        </div>
+        <LocalAIRiggingSection />
       </section>
     </div>
   )

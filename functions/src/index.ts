@@ -13,6 +13,7 @@
  *                 returns the updated job (the client polls this).
  */
 import { setGlobalOptions } from 'firebase-functions/v2';
+import * as logger from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { initializeApp } from 'firebase-admin/app';
 import { Firestore } from '@google-cloud/firestore';
@@ -20,12 +21,12 @@ import { meshyDispatch, meshyPoll, type TaskKey } from './meshy.js';
 import { persistAsset } from './storage.js';
 import { bumpJobCreated, bumpJobTerminal } from './stats.js';
 
-// Note: In a multi-database environment, we must instantiate a client from
-// @google-cloud/firestore directly. It automatically picks up credentials
-// and project ID from the runtime environment.
-const db = new Firestore({ databaseId: 'gerador3d' });
-
 initializeApp();
+
+const db = new Firestore({
+  projectId: process.env.GCLOUD_PROJECT || 'antonov-82411',
+  databaseId: 'gerador3d'
+});
 
 setGlobalOptions({
   region: 'us-central1',
@@ -57,94 +58,107 @@ async function loadCreds(uid: string, providerId: string) {
 // ── generate3d ────────────────────────────────────────────────────────────────
 
 export const generate3d = onCall(async (request) => {
-  const uid = request.auth?.uid
-  if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.')
-
-  const data = request.data as {
-    jobId: string
-    task: TaskKey
-    modelId: string
-    providerId: string
-    prompt?: string
-    imageDataUrl?: string
-  }
-
-  const { jobId, task, modelId, providerId } = data
-  if (!jobId || !task || !modelId || !providerId) {
-    throw new HttpsError('invalid-argument', 'Missing required fields.')
-  }
-
-  const now = new Date().toISOString()
-  const jobRef = db.doc(`users/${uid}/jobs/${jobId}`)
-  await jobRef.set({
-    id: jobId,
-    uid,
-    task: capabilityFor(task),
-    providerId,
-    modelId,
-    status: 'pending',
-    progress: 0,
-    params: { prompt: data.prompt ?? '', hasImage: Boolean(data.imageDataUrl), taskKey: task },
-    created_at: now,
-    updated_at: now,
-  })
-
-  void bumpJobCreated(providerId, capabilityFor(task))
-
-  if (providerId !== 'meshy') {
-    await jobRef.update({
-      status: 'failed',
-      error: `Provider "${providerId}" is not yet implemented in the proxy.`,
-      updated_at: new Date().toISOString(),
-    })
-    void bumpJobTerminal('failed')
-    throw new HttpsError('unimplemented', `Provider "${providerId}" not implemented yet.`)
-  }
-
-  const { apiKey, baseUrl } = await loadCreds(uid, providerId)
-  if (!apiKey) {
-    await jobRef.update({
-      status: 'failed',
-      error: 'Missing API key for this provider.',
-      updated_at: new Date().toISOString(),
-    })
-    void bumpJobTerminal('failed')
-    throw new HttpsError('failed-precondition', 'Missing API key for this provider.')
-  }
-
   try {
-    const dispatch = await meshyDispatch({
-      task,
-      modelId,
-      prompt: data.prompt,
-      imageDataUrl: data.imageDataUrl,
-      apiKey,
-      baseUrl,
-    })
-    await jobRef.update({
-      status: 'in_progress',
-      progress: 1,
-      providerTaskId: dispatch.providerTaskId,
-      params: {
-        prompt: data.prompt ?? '',
-        hasImage: Boolean(data.imageDataUrl),
-        taskKey: task,
-        stage: dispatch.stage,
-      },
-      updated_at: new Date().toISOString(),
-    })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Dispatch failed.'
-    await jobRef.update({
-      status: 'failed',
-      error: message,
-      updated_at: new Date().toISOString(),
-    })
-    void bumpJobTerminal('failed')
-    throw new HttpsError('internal', message)
-  }
+    const uid = request.auth?.uid
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.')
 
-  return { jobId }
+    const data = request.data as {
+      jobId: string
+      task: TaskKey
+      modelId: string
+      providerId: string
+      prompt?: string
+      imageDataUrl?: string
+    }
+
+    const { jobId, task, modelId, providerId } = data
+    if (!jobId || !task || !modelId || !providerId) {
+      throw new HttpsError('invalid-argument', 'Missing required fields.')
+    }
+
+    const now = new Date().toISOString()
+    const jobRef = db.doc(`users/${uid}/jobs/${jobId}`)
+    await jobRef.set({
+      id: jobId,
+      uid,
+      task: capabilityFor(task),
+      providerId,
+      modelId,
+      status: 'pending',
+      progress: 0,
+      params: { prompt: data.prompt ?? '', hasImage: Boolean(data.imageDataUrl), taskKey: task },
+      created_at: now,
+      updated_at: now,
+    })
+
+    void bumpJobCreated(providerId, capabilityFor(task))
+
+    if (providerId !== 'meshy' && providerId !== 'local') {
+      await jobRef.update({
+        status: 'failed',
+        error: `Provider "${providerId}" is not yet implemented in the proxy.`,
+        updated_at: new Date().toISOString(),
+      })
+      void bumpJobTerminal('failed')
+      throw new HttpsError('unimplemented', `Provider "${providerId}" not implemented yet.`)
+    }
+
+    // Pass API key check if it's a mock action like "local" provider or just rigging mock.
+    let apiKey = ''
+    let baseUrl = ''
+    if (providerId === 'meshy' && task !== 'rigging') {
+      const creds = await loadCreds(uid, providerId)
+      apiKey = creds.apiKey
+      baseUrl = creds.baseUrl
+      if (!apiKey) {
+        await jobRef.update({
+          status: 'failed',
+          error: 'Missing API key for this provider.',
+          updated_at: new Date().toISOString(),
+        })
+        void bumpJobTerminal('failed')
+        throw new HttpsError('failed-precondition', 'Missing API key for this provider.')
+      }
+    }
+
+    try {
+      const dispatch = await meshyDispatch({
+        task,
+        modelId,
+        prompt: data.prompt,
+        imageDataUrl: data.imageDataUrl,
+        apiKey,
+        baseUrl,
+      })
+      await jobRef.update({
+        status: 'in_progress',
+        progress: 1,
+        providerTaskId: dispatch.providerTaskId,
+        params: {
+          prompt: data.prompt ?? '',
+          hasImage: Boolean(data.imageDataUrl),
+          taskKey: task,
+          stage: dispatch.stage,
+        },
+        updated_at: new Date().toISOString(),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Dispatch failed.'
+      await jobRef.update({
+        status: 'failed',
+        error: message,
+        updated_at: new Date().toISOString(),
+      })
+      void bumpJobTerminal('failed')
+      throw new HttpsError('internal', message)
+    }
+
+    return { jobId }
+  } catch (err) {
+    logger.error('generate3d error:', err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', err instanceof Error ? err.message : 'Unknown error');
+  }
 })
 
 // ── pollJob3d ─────────────────────────────────────────────────────────────────
