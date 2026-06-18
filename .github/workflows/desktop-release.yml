@@ -7,6 +7,10 @@ name: Build Desktop Installer
 on:
   push:
     tags: ['desktop-v*']
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-release.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -86,12 +90,25 @@ jobs:
         shell: pwsh
         run: Get-ChildItem desktop/release | Format-Table Name,Length
 
+      # Resolve a tag do release: input (dispatch) > tag (push tag) > padrão (push main).
+      - name: Resolve release tag
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=desktop-v0.1.0" >> "$GITHUB_OUTPUT"
+          fi
+
       # ── Publica o Release com o .exe ────────────────────────────────────────
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: Gerador3D Desktop ${{ github.event.inputs.version || github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Gerador3D Desktop ${{ steps.ver.outputs.tag }}
           draft: false
           prerelease: false
           files: |
