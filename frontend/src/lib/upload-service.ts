@@ -1,7 +1,7 @@
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { IS_FIREBASE, storage } from './firebase'
 import { getCurrentUserId } from './firestore-service'
-import { createJob } from './jobs-store'
+import { createJob, updateJob } from './jobs-store'
 import type { GenerationJob } from './firestore-types'
 
 export async function upload3DModel(file: File, onProgress?: (progress: number) => void): Promise<GenerationJob> {
@@ -66,22 +66,12 @@ export async function upload3DModel(file: File, onProgress?: (progress: number) 
   }
 
   // Update job to succeeded with outputs
-  const updatedJob: GenerationJob = {
-    ...job,
-    status: 'succeeded',
-    progress: 100,
-    outputs,
-    updated_at: new Date().toISOString(),
-  }
-  
-  // we need to call updateJob, let's import it
-  const { updateJob } = await import('./jobs-store')
   await updateJob(jobId, {
     status: 'succeeded',
     progress: 100,
     outputs,
-    updated_at: updatedJob.updated_at
+    updated_at: new Date().toISOString()
   })
 
-  return updatedJob
+  return { ...job, status: 'succeeded' as const, progress: 100, outputs, updated_at: new Date().toISOString() }
 }
