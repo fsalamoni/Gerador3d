@@ -1,21 +1,59 @@
 import os
 import subprocess
 import uuid
+import sys
 import requests
+from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI(title="Gerador3D Local Rigging Worker")
 jobs = {}
 
+# Caminho deste arquivo para achar o rig_script.py
+HERE = Path(__file__).parent.resolve()
+
 class RigRequest(BaseModel):
     downloadUrl: str
     uploadUrl: str = ""  # optional — if empty, worker just processes and returns success
 
+def find_blender() -> str:
+    """Encontra o Blender automaticamente no Windows."""
+    # 1. Variável de ambiente (configuração manual prioritária)
+    env = os.environ.get("BLENDER_PATH", "")
+    if env and Path(env).exists():
+        return env
+
+    # 2. Caminhos padrão de instalação do Blender (Windows)
+    candidates = []
+    # Blender via Microsoft Store ou instalador padrão
+    for base in [r"C:\Program Files\Blender Foundation", r"C:\Program Files (x86)\Blender Foundation"]:
+        if Path(base).exists():
+            for d in sorted(Path(base).iterdir(), reverse=True):
+                if d.is_dir() and d.name.startswith("Blender"):
+                    exe = d / "blender.exe"
+                    if exe.exists():
+                        candidates.append(str(exe))
+
+    # 3. Steam (comum em máquinas gamer)
+    steam = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
+    if steam.exists():
+        candidates.append(str(steam))
+
+    if candidates:
+        print(f"[Blender] Encontrado: {candidates[0]}")
+        return candidates[0]
+
+    # 4. Tenta o PATH como último recurso
+    return "blender"
+
+BLENDER_EXE = find_blender()
+
 def process_rigging(task_id: str, req: RigRequest):
     jobs[task_id] = {"status": "in_progress", "progress": 10}
-    input_path = f"{task_id}.glb"
-    output_path = f"{task_id}.vrm"
+    input_path = str(HERE / f"{task_id}.glb")
+    output_path = str(HERE / f"{task_id}.vrm")
+    rig_script = str(HERE / "rig_script.py")
     
     try:
         # 1. Baixar o GLB do Storage
@@ -28,10 +66,9 @@ def process_rigging(task_id: str, req: RigRequest):
         jobs[task_id]["progress"] = 30
 
         # 2. Executar o Blender de forma invisível
-        print(f"[{task_id}] Executando Blender Headless...")
-        blender_exe = os.environ.get("BLENDER_PATH", "blender")
+        print(f"[{task_id}] Executando Blender Headless ({BLENDER_EXE})...")
         blender_cmd = [
-            blender_exe, "-b", "-P", "rig_script.py", "--",
+            BLENDER_EXE, "-b", "-P", rig_script, "--",
             "--in", input_path, "--out", output_path
         ]
         subprocess.run(blender_cmd, check=True, capture_output=True)
@@ -61,8 +98,11 @@ def process_rigging(task_id: str, req: RigRequest):
         jobs[task_id]["status"] = "failed"
     finally:
         # Limpeza dos arquivos locais
-        if os.path.exists(input_path): os.remove(input_path)
-        if os.path.exists(output_path): os.remove(output_path)
+        for p in [input_path, output_path]:
+            try:
+                if os.path.exists(p): os.remove(p)
+            except Exception:
+                pass
 
 @app.post("/api/rig")
 def start_rig(req: RigRequest, background_tasks: BackgroundTasks):
@@ -76,7 +116,11 @@ def get_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return jobs[task_id]
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "blender": BLENDER_EXE}
+
 if __name__ == "__main__":
     import uvicorn
-    # Roda o servidor na porta 8000
+    print(f"[Worker] Blender detectado em: {BLENDER_EXE}")
     uvicorn.run(app, host="0.0.0.0", port=8000)
