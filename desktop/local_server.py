@@ -351,12 +351,23 @@ def provision_generation(data_dir: Path):
                 zpath.unlink()
             except Exception:
                 pass
-        _pset(progress=75)
+        _pset(progress=72)
 
+        # Instala as deps do TripoSR SEM o 'torchmcubes' (que exige compilar C++).
+        # No lugar dele usamos o PyMCubes (wheels prontas p/ Windows) — o backend
+        # registra um shim em runtime. Também garantimos rembg/onnxruntime.
         req = tdir / "requirements.txt"
         if req.exists():
-            _plog("Instalando dependências do TripoSR (pode exigir o C++ Build Tools)...")
-            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(req)])
+            lines = [ln.strip() for ln in req.read_text("utf-8").splitlines()]
+            keep = [ln for ln in lines
+                    if ln and not ln.startswith("#") and "torchmcubes" not in ln.lower()]
+            filtered = tdir / "requirements.gerador3d.txt"
+            filtered.write_text("\n".join(keep), "utf-8")
+            _plog("Instalando dependências do TripoSR (sem torchmcubes)...")
+            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(filtered)])
+        _plog("Instalando PyMCubes + rembg (marching cubes sem compilar)...")
+        _run([py, "-m", "pip", "install", "--no-warn-script-location",
+              "PyMCubes", "rembg", "onnxruntime"])
         _pset(progress=95)
 
         _CUDA_CACHE["checked"] = False  # re-checa CUDA depois de instalar o torch

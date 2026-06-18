@@ -3,12 +3,14 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Type, Image as ImageIcon, Sparkles, Upload, ArrowRight, Settings } from 'lucide-react'
+import { Type, Image as ImageIcon, Sparkles, Upload, ArrowRight, Settings, Wrench, Cpu } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useCatalogModels } from '../lib/model-catalog'
 import { resolveTaskModel, startGeneration } from '../lib/generation-client'
 import { subscribeJobs } from '../lib/jobs-store'
 import { useJobPolling } from '../lib/job-poller'
+import { IS_LOCAL } from '../lib/runtime'
+import { useLocalReadiness } from '../lib/use-local-readiness'
 import type { GenerationJob, ModelOption } from '../lib/firestore-types'
 import type { TaskKey } from '../lib/tasks-3d'
 import ModelViewer from '../components/ModelViewer'
@@ -27,6 +29,10 @@ export default function GeneratePage() {
   const [modelId, setModelId] = useState<string>('')
 
   const task: TaskKey = mode === 'text' ? 'text_to_3d' : 'image_to_3d'
+
+  // Desktop app: know whether the local generation engine is installed.
+  const diag = useLocalReadiness(IS_LOCAL ? 4000 : 0)
+  const genReady = !IS_LOCAL || Boolean(diag?.generation.ready)
 
   useEffect(() => {
     void resolveTaskModel(task).then(setModelId)
@@ -59,7 +65,7 @@ export default function GeneratePage() {
   }
 
   async function handleGenerate() {
-    if (!model) return
+    if (!IS_LOCAL && !model) return // cloud needs a catalog model; local doesn't
     setBusy(true)
     try {
       const jobId = await startGeneration({
@@ -71,8 +77,8 @@ export default function GeneratePage() {
         id: jobId,
         uid: '',
         task: task === 'text_to_3d' ? 'text-to-3d' : 'image-to-3d',
-        providerId: model.providerId ?? '',
-        modelId: model.id,
+        providerId: IS_LOCAL ? 'local' : (model?.providerId ?? ''),
+        modelId: model?.id ?? 'local',
         status: 'pending',
         progress: 0,
         created_at: new Date().toISOString(),
@@ -84,7 +90,8 @@ export default function GeneratePage() {
   }
 
   const canGenerate =
-    Boolean(model) && (mode === 'text' ? prompt.trim().length > 0 : Boolean(imageDataUrl))
+    (IS_LOCAL ? genReady : Boolean(model)) &&
+    (mode === 'text' ? prompt.trim().length > 0 : Boolean(imageDataUrl))
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -172,8 +179,26 @@ export default function GeneratePage() {
             </div>
           )}
 
-          {/* Model used / warning */}
-          {model ? (
+          {/* Engine / model indicator */}
+          {IS_LOCAL ? (
+            genReady ? (
+              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+                <Cpu className="h-3.5 w-3.5 text-brand-300" />
+                Geração local · TripoSR (na sua GPU)
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                <span>A geração 3D ainda não está instalada neste PC.</span>
+                <Link
+                  to="/app/setup"
+                  className="inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2 py-1 font-medium text-amber-200"
+                >
+                  <Wrench className="h-3 w-3" />
+                  Configurar
+                </Link>
+              </div>
+            )
+          ) : model ? (
             <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
               <span className="text-slate-400">{t('generate.modelUsed')}</span>
               <span className="font-medium text-slate-200">
@@ -223,6 +248,12 @@ export default function GeneratePage() {
               </div>
             )}
           </div>
+
+          {activeJob?.status === 'failed' && (
+            <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {(activeJob.error as string) || 'A geração falhou.'}
+            </p>
+          )}
 
           {activeJob?.status === 'succeeded' && (
             <Link

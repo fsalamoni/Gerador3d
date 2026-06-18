@@ -16,9 +16,11 @@ Instale estes 3-4 programas (uma vez):
 1. **Driver NVIDIA** (atualizado) — https://www.nvidia.com/Download/index.aspx
 2. **Python 3.11** — https://www.python.org/downloads/ → no instalador **marque “Add Python to PATH”**.
 3. **Git** — https://git-scm.com/download/win (instalação padrão, só ir clicando “Next”).
-4. **Microsoft C++ Build Tools** — https://visualstudio.microsoft.com/visual-cpp-build-tools/
-   → no instalador, marque **“Desktop development with C++”**.
-   *(Necessário para compilar uma peça do TripoSR. Se pular e der erro no setup, instale e rode de novo.)*
+4. **(Opcional) Microsoft C++ Build Tools** — https://visualstudio.microsoft.com/visual-cpp-build-tools/
+   → marque **“Desktop development with C++”**.
+   *Não é mais obrigatório:* usamos o **PyMCubes** (wheels prontas) no lugar do
+   `torchmcubes`, então a instalação funciona sem compilar. Instale o C++ apenas
+   se quiser o caminho oficial do `torchmcubes`.
 
 ## 2) Preparar (1 comando, faz quase tudo sozinho)
 1. Abra a pasta **`worker-3dgen`** do projeto.

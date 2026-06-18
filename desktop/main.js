@@ -10,7 +10,7 @@
  * Observação: Blender e (opcional) PyTorch/modelos NÃO cabem dentro do
  * instalador — são detectados/guiados (ver setup.bat e os READMEs).
  */
-const { app, BrowserWindow, dialog } = require('electron')
+const { app, BrowserWindow, dialog, Menu, shell } = require('electron')
 const { spawn, spawnSync } = require('child_process')
 const http = require('http')
 const path = require('path')
@@ -114,7 +114,13 @@ function startEngine() {
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, backgroundColor: '#0b1020',
+    title: 'Gerador3D', autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, preload: path.join(__dirname, 'preload.js') },
+  })
+  // Links externos (ajuda, OBS) abrem no navegador padrão, não numa janela vazia.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
   })
   win.loadFile(path.join(__dirname, 'loading.html'))
   waitForHealth(120000, (ok) => {
@@ -123,11 +129,20 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
-  startEngine()
-  createWindow()
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
-})
+// Uma instância só (evita dois motores na mesma porta).
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (win) { if (win.isMinimized()) win.restore(); win.focus() }
+  })
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null) // app limpo, sem menu File/Edit/View
+    startEngine()
+    createWindow()
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  })
+}
 
 function killEngine() {
   if (engine && !engine.killed) {

@@ -46,12 +46,14 @@ if not exist TripoSR (
   echo [..] Baixando o TripoSR (modelo open-source, MIT)...
   git clone https://github.com/VAST-AI-Research/TripoSR.git
 )
+echo [..] Marching cubes SEM compilar (PyMCubes) + remocao de fundo (rembg)...
+pip install PyMCubes rembg onnxruntime
 echo [..] Instalando dependencias do TripoSR...
 pip install -r TripoSR\requirements.txt
 if errorlevel 1 (
-  echo [AVISO] Alguma dependencia do TripoSR falhou. Geralmente e o "torchmcubes",
-  echo que precisa do "Microsoft C++ Build Tools" (Desktop development with C++).
-  echo Instale em https://visualstudio.microsoft.com/visual-cpp-build-tools/ e rode de novo.
+  echo [INFO] O "torchmcubes" pode falhar sem o C++ Build Tools — tudo bem:
+  echo usamos o PyMCubes automaticamente. Se quiser o caminho oficial, instale
+  echo https://visualstudio.microsoft.com/visual-cpp-build-tools/ e rode de novo.
 )
 
 REM ── Verificacao ────────────────────────────────────────────

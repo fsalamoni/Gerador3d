@@ -76,6 +76,40 @@ def text_to_image(prompt: str, out_png: str, progress=None) -> str:
 # https://github.com/VAST-AI-Research/TripoSR
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _install_mcubes_shim():
+    """Permite o TripoSR rodar SEM o 'torchmcubes' (que exige compilar C++ no
+    Windows). Se o torchmcubes não estiver disponível, registramos um módulo
+    fake que implementa marching_cubes via PyMCubes (wheels prontas p/ Windows).
+    O TripoSR faz `from torchmcubes import marching_cubes`, então basta o módulo
+    existir em sys.modules antes do import."""
+    try:
+        import torchmcubes  # noqa: F401  (compilado — usa o caminho oficial)
+        return
+    except Exception:
+        pass
+    try:
+        import types as _types
+        import numpy as _np
+        import torch as _torch
+        import mcubes as _mcubes  # PyMCubes (prebuilt wheel)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "Sem 'torchmcubes' e sem 'PyMCubes'. Instale a geração 3D pela tela "
+            "de Configuração (ela instala o PyMCubes). Detalhe: " + str(exc))
+
+    def marching_cubes(vol, thresh):
+        v = vol.detach().cpu().numpy().astype("float64")
+        verts, faces = _mcubes.marching_cubes(v, float(thresh))
+        vt = _torch.from_numpy(_np.ascontiguousarray(verts)).float()
+        ft = _torch.from_numpy(_np.ascontiguousarray(faces)).long()
+        return vt, ft
+
+    mod = _types.ModuleType("torchmcubes")
+    mod.marching_cubes = marching_cubes
+    sys.modules["torchmcubes"] = mod
+    print("[backends] usando PyMCubes (sem compilar torchmcubes).", flush=True)
+
+
 def _triposr(task, prompt, image_path, out_path, progress):
     import torch
     from PIL import Image
@@ -84,6 +118,7 @@ def _triposr(task, prompt, image_path, out_path, progress):
         progress(20, "carregando TripoSR")
     if "triposr" not in _MODELS:
         _ensure_local_repo_on_path("TripoSR", "tsr_repo")
+        _install_mcubes_shim()  # garante marching cubes sem compilar
         from tsr.system import TSR
         model = TSR.from_pretrained(
             os.environ.get("TRIPOSR_MODEL", "stabilityai/TripoSR"),

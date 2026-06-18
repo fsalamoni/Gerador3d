@@ -59,7 +59,25 @@ Modelos como TripoSR/SF3D fazem **imagem→malha** direto (feed-forward, < 1s).
 5. **Texto→3D**: escolher o modelo texto→imagem (SDXL Turbo p/ velocidade ou FLUX
    p/ qualidade) e fixar nos requirements.
 
+## Atualização — instalação "sem compilar" (confiabilidade no Windows)
+O erro nº1 ao instalar o TripoSR é compilar o `torchmcubes` (exige
+"Microsoft C++ Build Tools"). Resolvido: o **PyMCubes** publica wheels prontas
+para Windows (Python 3.10–3.12) e implementa o mesmo marching cubes. O app:
+- instala o TripoSR **sem** o `torchmcubes` e adiciona o **PyMCubes**;
+- registra em runtime um *shim* `torchmcubes` que chama o PyMCubes, então o
+  TripoSR roda **sem compilação** (o caminho oficial via C++ continua possível).
+Isso torna a geração "abrir e usar" sem pré-requisitos de compilador.
+
+### Melhorias de usabilidade/UX já aplicadas
+- App desktop entra **direto** no programa (sem landing/login/demo).
+- Tela **Configuração** instala geração/Blender por dentro, com progresso ao vivo.
+- **Generate**: mostra "Geração local · TripoSR", bloqueia com CTA quando não
+  instalada, e exibe erros do job. **Dashboard**: card de status/onboarding.
+- Electron: instância única, menu limpo, links externos abrem no navegador.
+
 ## Fontes
+- PyMCubes (wheels Windows, sem compilar): https://pypi.org/project/PyMCubes/
+- TripoSR torchmcubes (erro de build no Windows): https://github.com/VAST-AI-Research/TripoSR/issues/74
 - TRELLIS (Microsoft): https://github.com/microsoft/TRELLIS — MIT, 16GB, Linux.
 - TRELLIS.2: https://github.com/microsoft/TRELLIS.2 e https://huggingface.co/microsoft/TRELLIS.2-4B
 - Hunyuan3D-2.1 (Tencent): https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 — `api_server.py`, low VRAM.
