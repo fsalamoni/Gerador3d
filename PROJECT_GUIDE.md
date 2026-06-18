@@ -65,6 +65,11 @@ Gerador3d/
 ## Worker de Rigging Local
 - Servidor Python na porta 8000
 - Recebe GLB via API REST → processa com Blender → retorna VRM
+- Pipeline real em `rig_script.py`: transfere os 52 blendshapes ARKit de um
+  template facial para a malha do usuário (Surface Deform / Deformation
+  Transfer), cria o esqueleto humanoide e exporta `.vrm` (VRM Add-on).
+- Precisa de um `template_face.glb` (52 shape keys ARKit) na pasta do worker —
+  ver `worker-rigging/README.md`.
 - Exposto via ngrok para a Cloud Function alcançar
 - `start.bat` inicia tudo automaticamente
 
@@ -87,8 +92,10 @@ cd worker-rigging && python main.py
 ```
 
 ## O que falta implementar
-1. Script real de rigging facial no `rig_script.py` — atualmente é um mock
+1. ~~Script real de rigging facial no `rig_script.py`~~ ✅ implementado
+   (Surface Deform / Deformation Transfer + export VRM). Requer o template
+   facial `template_face.glb` e o VRM Add-on no Blender.
 2. Integração com provedores além do Meshy (Tripo, Rodin, Hunyuan)
 3. Interface de edição de VRM no Estúdio
-4. Testes automatizados
-5. Suporte a VRM para exportação final
+4. Testes automatizados (parcial: lógica do Worker coberta por testes locais)
+5. ~~Suporte a VRM para exportação final~~ ✅ pipeline do Worker exporta `.vrm`

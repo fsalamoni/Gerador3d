@@ -48,16 +48,13 @@ export default function LibraryPage() {
   const handleRigging = async (job: GenerationJob) => {
     if (!job.outputs?.glbUrl) return
     try {
+      // Pass the source model URL as `prompt`; the Cloud Function creates the
+      // rigging job in Firestore and dispatches it to the local worker. The new
+      // job then appears in this grid via `subscribeJobs`.
       await startGeneration({
         task: 'rigging',
-        prompt: job.outputs.glbUrl, // pass source URL here
+        prompt: job.outputs.glbUrl,
       })
-      // The generation-client will call the Cloud Function, which creates the job.
-      // We also need to optimistically create the job doc or just wait for the cloud function to create it.
-      // startGeneration creates the job locally in demo mode, but in Firebase mode, the cloud function creates it.
-      // Wait, in GeneratePage we do:
-      // startGeneration() then setActiveJob(...) which updates the UI.
-      // Here we don't need activeJob, it will just appear in the grid!
     } catch (err) {
       console.error('Rigging dispatch failed:', err)
       alert(t('library.riggingFailed') || 'Failed to start rigging')
@@ -173,6 +170,12 @@ export default function LibraryPage() {
               {typeof job.params?.prompt === 'string' && job.params.prompt && (
                 <p className="mt-2 line-clamp-2 text-sm text-slate-300">
                   {job.params.prompt as string}
+                </p>
+              )}
+
+              {job.status === 'failed' && job.error && (
+                <p className="mt-2 line-clamp-3 text-xs text-red-300/90">
+                  {job.error}
                 </p>
               )}
 

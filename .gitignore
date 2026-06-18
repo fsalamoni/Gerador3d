@@ -25,7 +25,18 @@ Thumbs.db
 # TypeScript incremental build cache
 *.tsbuildinfo
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+
 # Worker temp files
 worker-rigging/*.glb
 worker-rigging/*.vrm
 worker-rigging/Base
+
+# ...but allow committing the facial rigging template if one is provided
+!worker-rigging/template_face.glb
+!worker-rigging/template_face.gltf
+!worker-rigging/template_face.vrm
+!worker-rigging/templates/

@@ -16,6 +16,7 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import * as logger from 'firebase-functions/logger';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { initializeApp } from 'firebase-admin/app';
+import { getStorage } from 'firebase-admin/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { meshyDispatch, meshyPoll, type TaskKey } from './meshy.js';
 import { persistAsset } from './storage.js';
@@ -53,6 +54,37 @@ async function loadCreds(uid: string, providerId: string) {
   const apiKey = prefs.api_keys?.[`${providerId}_api_key`] ?? ''
   const baseUrl = prefs.provider_settings?.[providerId]?.base_url ?? ''
   return { apiKey, baseUrl }
+}
+
+/** Storage path where the local worker uploads the rigged VRM. */
+function riggedVrmPath(uid: string, jobId: string): string {
+  return `antonov3d/users/${uid}/models/${jobId}/model.vrm`
+}
+
+/**
+ * Signed URL the worker uses to PUT the finished VRM straight into Storage.
+ * The worker sends `Content-Type: application/octet-stream`, so the URL must be
+ * signed with the same content type. Short lived — the job finishes in minutes.
+ */
+async function createWorkerUploadUrl(uid: string, jobId: string): Promise<string> {
+  const file = getStorage().bucket().file(riggedVrmPath(uid, jobId))
+  const [url] = await file.getSignedUrl({
+    version: 'v4',
+    action: 'write',
+    expires: Date.now() + 60 * 60 * 1000, // 1 hour
+    contentType: 'application/octet-stream',
+  })
+  return url
+}
+
+/** Long-lived signed read URL for the rigged VRM once the worker uploaded it. */
+async function readRiggedVrmUrl(uid: string, jobId: string): Promise<string> {
+  const file = getStorage().bucket().file(riggedVrmPath(uid, jobId))
+  const [url] = await file.getSignedUrl({
+    action: 'read',
+    expires: '03-01-2500',
+  })
+  return url
 }
 
 // ── generate3d ────────────────────────────────────────────────────────────────
@@ -118,12 +150,29 @@ export const generate3d = onCall(async (request) => {
         throw new HttpsError('failed-precondition', 'Configure a worker URL for the self-hosted provider.')
       }
 
+      // The frontend passes the source model download link as `prompt`.
+      const sourceUrl = data.prompt || ''
+      if (!sourceUrl) {
+        await jobRef.update({
+          status: 'failed',
+          error: 'No source model URL provided for rigging.',
+          updated_at: new Date().toISOString(),
+        })
+        void bumpJobTerminal('failed')
+        throw new HttpsError('invalid-argument', 'Missing source model URL for rigging.')
+      }
+
+      // Pre-sign the destination so the worker can upload the VRM straight into
+      // the user's Storage folder (no service-account key on the worker side).
+      const uploadUrl = await createWorkerUploadUrl(uid, jobId)
+
       // Dispatch to the local worker (FastAPI)
       const workerEndpoint = `${baseUrl}/api/rig`
       logger.info('Dispatching rigging to local worker:', workerEndpoint)
-      
+
       const workerPayload = {
-        downloadUrl: data.prompt || '', // frontend passes the model download link as prompt
+        downloadUrl: sourceUrl,
+        uploadUrl,
       }
 
       try {
@@ -260,8 +309,12 @@ export const pollJob3d = onCall(async (request) => {
         return job
       }
       
-      const workerStatus = await statusResp.json() as { status: string; progress: number }
-      
+      const workerStatus = await statusResp.json() as {
+        status: string
+        progress: number
+        error?: string
+      }
+
       const patch: Record<string, any> = {
         progress: workerStatus.progress || job.progress,
         updated_at: new Date().toISOString(),
@@ -270,14 +323,12 @@ export const pollJob3d = onCall(async (request) => {
       if (workerStatus.status === 'succeeded') {
         patch.status = 'succeeded'
         patch.progress = 100
-        // The worker uploaded the result to the storage URL we provided
-        // We need to construct the final URL based on the job's storage path
-        const storageBucket = process.env.GCLOUD_PROJECT ? `${process.env.GCLOUD_PROJECT}.firebasestorage.app` : 'antonov-82411.firebasestorage.app'
-        const vrmUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o/antonov3d%2Fusers%2F${uid}%2Fmodels%2F${jobId}%2Fmodel.vrm?alt=media`
-        patch.outputs = { vrmUrl }
+        // The worker uploaded the VRM to the path we pre-signed at dispatch.
+        // Hand back a long-lived signed read URL for it.
+        patch.outputs = { vrmUrl: await readRiggedVrmUrl(uid, jobId) }
       } else if (workerStatus.status === 'failed') {
         patch.status = 'failed'
-        patch.error = 'Worker processing failed'
+        patch.error = workerStatus.error || 'Worker processing failed'
       }
 
       await jobRef.update(patch)

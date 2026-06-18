@@ -2,7 +2,7 @@
 chcp 65001 >nul
 title Gerador3D - Worker de Rigging Local
 
-cd /d d:\Gerador3d\worker-rigging
+cd /d "%~dp0"
 
 echo.
 echo [36m╔══════════════════════════════════════════════╗
@@ -16,7 +16,7 @@ taskkill /F /IM ngrok.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 echo [33mIniciando Worker Python na porta 8000...[0m
-start "Gerador3D Worker" cmd /k "python d:\Gerador3d\worker-rigging\main.py"
+start "Gerador3D Worker" cmd /k "python "%~dp0main.py""
 
 echo [33mAguardando Worker iniciar...[0m
 timeout /t 3 /nobreak >nul

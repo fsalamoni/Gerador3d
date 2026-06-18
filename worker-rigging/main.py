@@ -1,7 +1,21 @@
+"""
+Gerador3D — Worker local de Rigging Facial (FastAPI + Blender headless).
+
+Fluxo:
+  POST /api/rig    → recebe { downloadUrl, uploadUrl } e inicia o job em background.
+  GET  /api/status/{taskId} → { status, progress, error? }.
+  GET  /api/health → { status, blender, template }.
+
+A Cloud Function (functions/src/index.ts) chama este worker via ngrok:
+  - downloadUrl: link assinado de leitura do GLB do usuário (no Storage).
+  - uploadUrl  : link assinado de escrita (PUT) onde devolvemos o .vrm gerado.
+
+O processamento real do rigging facial está em rig_script.py (Blender/bpy).
+"""
+
 import os
 import subprocess
 import uuid
-import sys
 import requests
 from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, HTTPException
@@ -10,24 +24,29 @@ from pydantic import BaseModel
 app = FastAPI(title="Gerador3D Local Rigging Worker")
 jobs = {}
 
-# Caminho deste arquivo para achar o rig_script.py
+# Caminho deste arquivo para achar o rig_script.py e o template.
 HERE = Path(__file__).parent.resolve()
+RIG_SCRIPT = HERE / "rig_script.py"
+
 
 class RigRequest(BaseModel):
     downloadUrl: str
-    uploadUrl: str = ""  # optional — if empty, worker just processes and returns success
+    # Link assinado (PUT) onde devolvemos o resultado. Se vazio, o worker
+    # apenas processa e marca sucesso (útil para testes locais).
+    uploadUrl: str = ""
+
 
 def find_blender() -> str:
     """Encontra o Blender automaticamente no Windows."""
-    # 1. Variável de ambiente (configuração manual prioritária)
+    # 1. Variável de ambiente (configuração manual prioritária).
     env = os.environ.get("BLENDER_PATH", "")
     if env and Path(env).exists():
         return env
 
-    # 2. Caminhos padrão de instalação do Blender (Windows)
+    # 2. Caminhos padrão de instalação do Blender (Windows).
     candidates = []
-    # Blender via Microsoft Store ou instalador padrão
-    for base in [r"C:\Program Files\Blender Foundation", r"C:\Program Files (x86)\Blender Foundation"]:
+    for base in [r"C:\Program Files\Blender Foundation",
+                 r"C:\Program Files (x86)\Blender Foundation"]:
         if Path(base).exists():
             for d in sorted(Path(base).iterdir(), reverse=True):
                 if d.is_dir() and d.name.startswith("Blender"):
@@ -35,7 +54,7 @@ def find_blender() -> str:
                     if exe.exists():
                         candidates.append(str(exe))
 
-    # 3. Steam (comum em máquinas gamer)
+    # 3. Steam (comum em máquinas gamer).
     steam = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe")
     if steam.exists():
         candidates.append(str(steam))
@@ -44,71 +63,130 @@ def find_blender() -> str:
         print(f"[Blender] Encontrado: {candidates[0]}")
         return candidates[0]
 
-    # 4. Tenta o PATH como último recurso
+    # 4. Tenta o PATH como último recurso.
     return "blender"
+
+
+def find_template() -> str:
+    """Localiza o template facial (com os 52 shape keys ARKit), se existir."""
+    env = os.environ.get("RIG_TEMPLATE_PATH", "")
+    if env and Path(env).exists():
+        return env
+    for ext in (".vrm", ".glb", ".gltf", ".blend"):
+        for folder in (HERE, HERE / "templates"):
+            p = folder / f"template_face{ext}"
+            if p.exists():
+                return str(p)
+    return ""
+
 
 BLENDER_EXE = find_blender()
 
+
+def _set(task_id: str, **kwargs):
+    jobs.setdefault(task_id, {})
+    jobs[task_id].update(kwargs)
+
+
 def process_rigging(task_id: str, req: RigRequest):
-    jobs[task_id] = {"status": "in_progress", "progress": 10}
-    input_path = str(HERE / f"{task_id}.glb")
-    output_path = str(HERE / f"{task_id}.vrm")
-    rig_script = str(HERE / "rig_script.py")
-    
+    _set(task_id, status="in_progress", progress=5, error=None)
+    input_path = HERE / f"{task_id}.glb"
+    output_path = HERE / f"{task_id}.vrm"
+
     try:
-        # 1. Baixar o GLB do Storage
-        print(f"[{task_id}] Fazendo download do GLB...")
-        r = requests.get(req.downloadUrl)
+        # 1. Baixar o GLB do Storage.
+        if not req.downloadUrl:
+            raise ValueError("downloadUrl ausente: nada para processar.")
+        print(f"[{task_id}] Baixando GLB de origem...")
+        r = requests.get(req.downloadUrl, timeout=120)
         r.raise_for_status()
-        with open(input_path, 'wb') as f:
-            f.write(r.content)
-            
-        jobs[task_id]["progress"] = 30
+        input_path.write_bytes(r.content)
+        if input_path.stat().st_size == 0:
+            raise ValueError("GLB baixado está vazio.")
+        _set(task_id, progress=30)
 
-        # 2. Executar o Blender de forma invisível
-        print(f"[{task_id}] Executando Blender Headless ({BLENDER_EXE})...")
+        # 2. Executar o Blender headless com o script de rigging real.
+        template = find_template()
+        print(f"[{task_id}] Executando Blender ({BLENDER_EXE})...")
         blender_cmd = [
-            BLENDER_EXE, "-b", "-P", rig_script, "--",
-            "--in", input_path, "--out", output_path
+            BLENDER_EXE, "-b", "-P", str(RIG_SCRIPT), "--",
+            "--in", str(input_path),
+            "--out", str(output_path),
         ]
-        subprocess.run(blender_cmd, check=True, capture_output=True)
-        
-        jobs[task_id]["progress"] = 80
+        if template:
+            blender_cmd += ["--template", template]
+        _set(task_id, progress=40)
 
-        # 3. Upload se tiver URL, senão apenas marca como sucesso
+        proc = subprocess.run(
+            blender_cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        # Logs do Blender ajudam muito no diagnóstico.
+        if proc.stdout:
+            print(f"[{task_id}] Blender stdout:\n{proc.stdout[-4000:]}")
+        if proc.stderr:
+            print(f"[{task_id}] Blender stderr:\n{proc.stderr[-4000:]}")
+
+        if proc.returncode != 0:
+            detail = _extract_error(proc.stderr) or _extract_error(proc.stdout)
+            raise RuntimeError(detail or f"Blender saiu com código {proc.returncode}.")
+
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise RuntimeError("Blender terminou mas não gerou o arquivo de saída.")
+        _set(task_id, progress=80)
+
+        # 3. Upload do resultado (se houver URL de upload).
         if req.uploadUrl:
-            print(f"[{task_id}] Fazendo upload do resultado...")
-            with open(output_path, 'rb') as f:
-                up_req = requests.put(
-                    req.uploadUrl, 
-                    data=f, 
-                    headers={"Content-Type": "application/octet-stream"}
+            print(f"[{task_id}] Enviando resultado ({output_path.stat().st_size} bytes)...")
+            with open(output_path, "rb") as f:
+                up = requests.put(
+                    req.uploadUrl,
+                    data=f,
+                    headers={"Content-Type": "application/octet-stream"},
+                    timeout=180,
                 )
-                up_req.raise_for_status()
-        
-        jobs[task_id]["progress"] = 100
-        jobs[task_id]["status"] = "succeeded"
+                up.raise_for_status()
+            _set(task_id, progress=95)
+
+        _set(task_id, status="succeeded", progress=100)
         print(f"[{task_id}] Concluído com sucesso!")
 
-    except subprocess.CalledProcessError as e:
-        print(f"[{task_id}] Erro no Blender: {e.stderr.decode()}")
-        jobs[task_id]["status"] = "failed"
-    except Exception as e:
+    except requests.HTTPError as e:
+        msg = f"Falha de rede ({e.response.status_code if e.response else '?'})."
+        print(f"[{task_id}] {msg} {e}")
+        _set(task_id, status="failed", error=msg)
+    except Exception as e:  # noqa: BLE001
         print(f"[{task_id}] Erro: {e}")
-        jobs[task_id]["status"] = "failed"
+        _set(task_id, status="failed", error=str(e)[:500])
     finally:
-        # Limpeza dos arquivos locais
-        for p in [input_path, output_path]:
+        # Limpeza dos arquivos locais.
+        for p in (input_path, output_path):
             try:
-                if os.path.exists(p): os.remove(p)
+                if p.exists():
+                    p.unlink()
             except Exception:
                 pass
+
+
+def _extract_error(text: str) -> str:
+    """Extrai a mensagem RIG_ERROR: ... emitida pelo rig_script, se houver."""
+    if not text:
+        return ""
+    for line in text.splitlines():
+        if "RIG_ERROR:" in line:
+            return line.split("RIG_ERROR:", 1)[1].strip()
+    return ""
+
 
 @app.post("/api/rig")
 def start_rig(req: RigRequest, background_tasks: BackgroundTasks):
     task_id = str(uuid.uuid4())
+    jobs[task_id] = {"status": "pending", "progress": 0, "error": None}
     background_tasks.add_task(process_rigging, task_id, req)
     return {"taskId": task_id}
+
 
 @app.get("/api/status/{task_id}")
 def get_status(task_id: str):
@@ -116,11 +194,20 @@ def get_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return jobs[task_id]
 
+
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "blender": BLENDER_EXE}
+    return {
+        "status": "ok",
+        "blender": BLENDER_EXE,
+        "blender_found": Path(BLENDER_EXE).exists() or BLENDER_EXE == "blender",
+        "template": find_template() or None,
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
     print(f"[Worker] Blender detectado em: {BLENDER_EXE}")
+    tmpl = find_template()
+    print(f"[Worker] Template facial: {tmpl or 'NÃO ENCONTRADO (rigging facial vai falhar)'}")
     uvicorn.run(app, host="0.0.0.0", port=8000)
