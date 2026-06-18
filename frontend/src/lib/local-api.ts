@@ -60,3 +60,39 @@ export async function localUpload(file: File): Promise<GenerationJob> {
   const res = await fetch(`${LOCAL_API}/upload`, { method: 'POST', body: form })
   return asJson<GenerationJob>(res)
 }
+
+// ── Setup / diagnóstico / provisionamento ──────────────────────────────────────
+
+export interface LocalDiagnostics {
+  rigging: { blender: boolean; blenderPath: string | null; template: boolean; ready: boolean }
+  generation: { torch: boolean; diffusers: boolean; triposr: boolean; cuda: boolean; ready: boolean }
+  python: string
+  backend: string
+}
+
+export interface ProvisionStatus {
+  active: boolean
+  target: string | null
+  progress: number
+  done: boolean
+  ok: boolean
+  error: string | null
+  log: string[]
+}
+
+export async function localDiagnostics(): Promise<LocalDiagnostics> {
+  return asJson<LocalDiagnostics>(await fetch(`${LOCAL_API}/diagnostics`))
+}
+
+export async function localProvision(target: 'generation' | 'blender'): Promise<void> {
+  const res = await fetch(`${LOCAL_API}/provision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target }),
+  })
+  await asJson(res)
+}
+
+export async function localProvisionStatus(): Promise<ProvisionStatus> {
+  return asJson<ProvisionStatus>(await fetch(`${LOCAL_API}/provision/status`))
+}

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
+import { IS_LOCAL } from './lib/runtime'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/AppLayout'
 import LandingPage from './pages/LandingPage'
@@ -19,6 +20,7 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'))
 const ObsView = lazy(() => import('./pages/ObsView'))
+const SetupPage = lazy(() => import('./pages/SetupPage'))
 
 function LoadingScreen() {
   return (
@@ -34,11 +36,12 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            {/* Public */}
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            {/* Public — in the local desktop app these are skipped entirely:
+                no landing page, no login. The app boots straight into /app. */}
+            <Route path="/" element={IS_LOCAL ? <Navigate to="/app" replace /> : <LandingPage />} />
+            <Route path="/login" element={IS_LOCAL ? <Navigate to="/app" replace /> : <LoginPage />} />
+            <Route path="/register" element={IS_LOCAL ? <Navigate to="/app" replace /> : <RegisterPage />} />
+            <Route path="/forgot-password" element={IS_LOCAL ? <Navigate to="/app" replace /> : <ForgotPasswordPage />} />
 
             {/* OBS capture surface (public, transparent) */}
             <Route path="/obs" element={<ObsView />} />
@@ -57,6 +60,7 @@ export default function App() {
               <Route path="/app/studio" element={<StudioPage />} />
               <Route path="/app/analytics" element={<AnalyticsPage />} />
               <Route path="/app/settings" element={<SettingsPage />} />
+              <Route path="/app/setup" element={<SetupPage />} />
               <Route path="/app/admin" element={<AdminPage />} />
             </Route>
 
@@ -71,7 +75,7 @@ export default function App() {
             />
 
             {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to={IS_LOCAL ? '/app' : '/'} replace />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

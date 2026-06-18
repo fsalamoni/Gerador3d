@@ -16,6 +16,8 @@
     "analytics": "Analytics",
     "settings": "Settings",
     "admin": "Admin",
+    "setup": "Setup",
+    "localMode": "Local app — everything runs on your PC",
     "logout": "Sign out"
   },
   "landing": {

@@ -224,15 +224,26 @@ def run_rig(store: Store, job, source_url: str):
             raise ValueError("Não consegui obter o modelo de origem para o rigging.")
         store.update(jid, progress=30)
 
-        blender = rigmod.find_blender()
+        blender = resolve_blender(store.dir) or rigmod.find_blender()
         template = rigmod.find_template()
         cmd = [blender, "-b", "-P", str(rigmod.RIG_SCRIPT), "--",
                "--in", str(src), "--out", str(out)]
         if template:
             cmd += ["--template", template]
 
+        # Usa os scripts (VRM Add-on) provisionados, se houver.
+        env = dict(os.environ)
+        cfg = store.dir / "engine_config.json"
+        if cfg.exists():
+            try:
+                bus = json.loads(cfg.read_text("utf-8")).get("blender_user_scripts")
+                if bus:
+                    env["BLENDER_USER_SCRIPTS"] = bus
+            except Exception:
+                pass
+
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, errors="replace", bufsize=1)
+                                text=True, errors="replace", bufsize=1, env=env)
         tail = []
         for raw in proc.stdout:
             line = raw.rstrip()
@@ -264,6 +275,208 @@ def run_rig(store: Store, job, source_url: str):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Diagnóstico + provisionamento (instalar dependências POR DENTRO do app)
+# ──────────────────────────────────────────────────────────────────────────────
+
+import importlib.util  # noqa: E402
+import zipfile  # noqa: E402
+import urllib.request  # noqa: E402
+
+PROVISION = {"active": False, "target": None, "progress": 0,
+             "done": False, "ok": False, "error": None, "log": []}
+_PLOCK = threading.Lock()
+_CUDA_CACHE = {"checked": False, "value": None}
+
+TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/main.zip"
+CUDA_INDEX = os.environ.get("TORCH_CUDA_INDEX", "https://download.pytorch.org/whl/cu121")
+
+
+def _plog(line):
+    line = str(line).rstrip()
+    with _PLOCK:
+        PROVISION["log"].append(line)
+        if len(PROVISION["log"]) > 400:
+            PROVISION["log"] = PROVISION["log"][-400:]
+    print(f"[provision] {line}", flush=True)
+
+
+def _pset(**kw):
+    with _PLOCK:
+        PROVISION.update(kw)
+
+
+def _run(cmd, cwd=None):
+    _plog("$ " + " ".join(str(c) for c in cmd))
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+    for raw in proc.stdout:
+        _plog(raw)
+    proc.wait()
+    if proc.returncode != 0:
+        raise RuntimeError(f"comando falhou (código {proc.returncode}): {cmd[0]}")
+
+
+def _download(url, dest, label=""):
+    _plog(f"baixando {label or url} ...")
+    with urllib.request.urlopen(url, timeout=600) as r, open(dest, "wb") as f:
+        shutil.copyfileobj(r, f)
+
+
+def provision_generation(data_dir: Path):
+    """Instala PyTorch (CUDA) + TripoSR + libs de geração no Python do app."""
+    try:
+        py = sys.executable
+        _pset(progress=5)
+        _plog("Instalando PyTorch (CUDA). Isto baixa ~2.5 GB, pode demorar...")
+        _run([py, "-m", "pip", "install", "--no-warn-script-location",
+              "torch", "torchvision", "--index-url", CUDA_INDEX])
+        _pset(progress=45)
+
+        _plog("Instalando libs de geração (diffusers/transformers/accelerate)...")
+        _run([py, "-m", "pip", "install", "--no-warn-script-location",
+              "diffusers", "transformers", "accelerate"])
+        _pset(progress=60)
+
+        tdir = GEN_DIR / "TripoSR"
+        if not tdir.exists():
+            _plog("Baixando TripoSR (modelo open-source, MIT)...")
+            zpath = data_dir / "triposr.zip"
+            _download(TRIPOSR_ZIP, zpath, "TripoSR")
+            with zipfile.ZipFile(zpath) as z:
+                z.extractall(GEN_DIR)
+            extracted = GEN_DIR / "TripoSR-main"
+            if extracted.exists():
+                extracted.rename(tdir)
+            try:
+                zpath.unlink()
+            except Exception:
+                pass
+        _pset(progress=75)
+
+        req = tdir / "requirements.txt"
+        if req.exists():
+            _plog("Instalando dependências do TripoSR (pode exigir o C++ Build Tools)...")
+            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(req)])
+        _pset(progress=95)
+
+        _CUDA_CACHE["checked"] = False  # re-checa CUDA depois de instalar o torch
+        _pset(progress=100, ok=True)
+        _plog("Geração 3D instalada com sucesso! Você já pode gerar texto/imagem → 3D.")
+    except Exception as e:  # noqa: BLE001
+        _pset(ok=False, error=str(e)[:500])
+        _plog(f"ERRO: {e}")
+        _plog("Dica: se falhou no 'torchmcubes', instale o Microsoft C++ Build Tools "
+              "(Desktop development with C++) e tente de novo.")
+    finally:
+        _pset(active=False, done=True)
+
+
+def provision_blender(data_dir: Path):
+    """Baixa o Blender portátil + VRM Add-on + template (fallback; o instalador
+    completo já traz o Blender embutido)."""
+    try:
+        _pset(progress=5)
+        idx_url = "https://download.blender.org/release/Blender4.2/"
+        _plog("Descobrindo a versão do Blender 4.2 LTS...")
+        with urllib.request.urlopen(idx_url, timeout=60) as r:
+            html = r.read().decode("utf-8", "replace")
+        import re
+        cands = sorted(set(re.findall(r'blender-4\.2\.\d+-windows-x64\.zip', html)))
+        if not cands:
+            raise RuntimeError("não encontrei o zip do Blender no índice oficial.")
+        zname = cands[-1]
+        bdir = data_dir / "blender"
+        bdir.mkdir(parents=True, exist_ok=True)
+        zpath = data_dir / zname
+        _download(idx_url + zname, zpath, zname)
+        _pset(progress=55)
+        _plog("Extraindo o Blender...")
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(data_dir / "bl_tmp")
+        inner = next((p for p in (data_dir / "bl_tmp").iterdir() if p.is_dir()), None)
+        for item in inner.iterdir():
+            dest = bdir / item.name
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True) if dest.is_dir() else dest.unlink()
+            shutil.move(str(item), str(bdir))
+        shutil.rmtree(data_dir / "bl_tmp", ignore_errors=True)
+        try:
+            zpath.unlink()
+        except Exception:
+            pass
+        blender_exe = bdir / "blender.exe"
+        _pset(progress=75)
+
+        scripts = bdir / "gr3d_scripts"
+        scripts.mkdir(exist_ok=True)
+        env = {**os.environ, "BLENDER_USER_SCRIPTS": str(scripts)}
+        _plog("Instalando o VRM Add-on...")
+        subprocess.run([str(blender_exe), "-b", "-P", str(RIG_DIR / "install_vrm_addon.py")],
+                       env=env, timeout=600)
+        _plog("Gerando o template facial...")
+        subprocess.run([str(blender_exe), "-b", "-P", str(RIG_DIR / "make_template.py"),
+                        "--", "--out", str(RIG_DIR / "template_face.glb")], env=env, timeout=600)
+
+        cfg = data_dir / "engine_config.json"
+        cfg.write_text(json.dumps({"blender": str(blender_exe),
+                                   "blender_user_scripts": str(scripts)}), "utf-8")
+        _pset(progress=100, ok=True)
+        _plog("Blender provisionado com sucesso! Rigging pronto.")
+    except Exception as e:  # noqa: BLE001
+        _pset(ok=False, error=str(e)[:500])
+        _plog(f"ERRO: {e}")
+    finally:
+        _pset(active=False, done=True)
+
+
+def resolve_blender(data_dir: Path):
+    cfg = data_dir / "engine_config.json"
+    if cfg.exists():
+        try:
+            p = json.loads(cfg.read_text("utf-8")).get("blender")
+            if p and Path(p).exists():
+                return p
+        except Exception:
+            pass
+    b = rigmod.find_blender()
+    if b and b != "blender" and Path(b).exists():
+        return b
+    return None
+
+
+def cuda_available_cached():
+    if not _CUDA_CACHE["checked"]:
+        _CUDA_CACHE["value"] = genbackends.cuda_available()
+        _CUDA_CACHE["checked"] = True
+    return _CUDA_CACHE["value"]
+
+
+def diagnostics(data_dir: Path):
+    blender = resolve_blender(data_dir)
+    template = rigmod.find_template()
+    torch_ok = importlib.util.find_spec("torch") is not None
+    diffusers_ok = importlib.util.find_spec("diffusers") is not None
+    triposr_ok = (GEN_DIR / "TripoSR").exists() or importlib.util.find_spec("tsr") is not None
+    return {
+        "rigging": {
+            "blender": bool(blender),
+            "blenderPath": blender,
+            "template": bool(template),
+            "ready": bool(blender and template),
+        },
+        "generation": {
+            "torch": torch_ok,
+            "diffusers": diffusers_ok,
+            "triposr": triposr_ok,
+            "cuda": cuda_available_cached() if torch_ok else False,
+            "ready": bool(torch_ok and triposr_ok),
+        },
+        "python": sys.executable,
+        "backend": GEN_BACKEND,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # App
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -271,6 +484,10 @@ class GenBody(BaseModel):
     task: str
     prompt: str = ""
     imageDataUrl: str = ""
+
+
+class ProvisionBody(BaseModel):
+    target: str  # 'generation' | 'blender'
 
 
 class RigBody(BaseModel):
@@ -288,8 +505,30 @@ def create_app(data_dir: Path) -> FastAPI:
     def health():
         return {"status": "ok", "backend": GEN_BACKEND,
                 "blender": rigmod.find_blender(),
-                "template": rigmod.find_template() or None,
-                "cuda": genbackends.cuda_available()}
+                "template": rigmod.find_template() or None}
+
+    @app.get("/api/local/diagnostics")
+    def diag():
+        return diagnostics(data_dir)
+
+    @app.post("/api/local/provision")
+    def provision(body: ProvisionBody):
+        if PROVISION["active"]:
+            raise HTTPException(409, "Já existe uma instalação em andamento.")
+        target = body.target
+        fn = {"generation": provision_generation, "blender": provision_blender}.get(target)
+        if not fn:
+            raise HTTPException(400, "target inválido (use 'generation' ou 'blender').")
+        with _PLOCK:
+            PROVISION.update({"active": True, "target": target, "progress": 0,
+                              "done": False, "ok": False, "error": None, "log": []})
+        spawn(fn, data_dir)
+        return {"ok": True, "target": target}
+
+    @app.get("/api/local/provision/status")
+    def provision_status():
+        with _PLOCK:
+            return dict(PROVISION)
 
     @app.post("/api/local/generate")
     def generate(body: GenBody):

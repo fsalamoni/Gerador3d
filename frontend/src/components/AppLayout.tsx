@@ -12,19 +12,32 @@ import {
   Library,
   BarChart3,
   ShieldCheck,
+  Wrench,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../contexts/AuthContext'
+import { IS_LOCAL } from '../lib/runtime'
 import LanguageSwitcher from './LanguageSwitcher'
 
-const NAV_ITEMS = [
-  { to: '/app', icon: LayoutDashboard, key: 'nav.dashboard', end: true },
-  { to: '/app/generate', icon: Sparkles, key: 'nav.generate', end: false },
-  { to: '/app/library', icon: Library, key: 'nav.library', end: false },
-  { to: '/app/studio', icon: Video, key: 'nav.studio', end: false },
-  { to: '/app/analytics', icon: BarChart3, key: 'nav.analytics', end: false },
-  { to: '/app/settings', icon: Settings, key: 'nav.settings', end: false },
-] as const
+// Cloud build: full nav. Desktop (local): task-focused nav with a Setup entry,
+// and no cloud-only Analytics.
+const NAV_ITEMS = (IS_LOCAL
+  ? [
+      { to: '/app', icon: LayoutDashboard, key: 'nav.dashboard', end: true },
+      { to: '/app/generate', icon: Sparkles, key: 'nav.generate', end: false },
+      { to: '/app/library', icon: Library, key: 'nav.library', end: false },
+      { to: '/app/studio', icon: Video, key: 'nav.studio', end: false },
+      { to: '/app/setup', icon: Wrench, key: 'nav.setup', end: false },
+      { to: '/app/settings', icon: Settings, key: 'nav.settings', end: false },
+    ]
+  : [
+      { to: '/app', icon: LayoutDashboard, key: 'nav.dashboard', end: true },
+      { to: '/app/generate', icon: Sparkles, key: 'nav.generate', end: false },
+      { to: '/app/library', icon: Library, key: 'nav.library', end: false },
+      { to: '/app/studio', icon: Video, key: 'nav.studio', end: false },
+      { to: '/app/analytics', icon: BarChart3, key: 'nav.analytics', end: false },
+      { to: '/app/settings', icon: Settings, key: 'nav.settings', end: false },
+    ]) as ReadonlyArray<{ to: string; icon: typeof LayoutDashboard; key: string; end: boolean }>
 
 export default function AppLayout() {
   const { t } = useTranslation()
@@ -87,17 +100,27 @@ export default function AppLayout() {
               {t('auth.demoNotice')}
             </div>
           )}
-          <div className="mb-2 px-2 text-xs text-slate-400">
-            {user?.displayName ?? user?.email}
-          </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
-          >
-            <LogOut className="h-4 w-4" />
-            {t('nav.logout')}
-          </button>
+          {IS_LOCAL ? (
+            // Desktop: no accounts/login — it's the user's own machine.
+            <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300">
+              <Box className="h-3.5 w-3.5" />
+              {t('nav.localMode') || 'App local — tudo roda no seu PC'}
+            </div>
+          ) : (
+            <>
+              <div className="mb-2 px-2 text-xs text-slate-400">
+                {user?.displayName ?? user?.email}
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
+              >
+                <LogOut className="h-4 w-4" />
+                {t('nav.logout')}
+              </button>
+            </>
+          )}
         </div>
       </aside>
 

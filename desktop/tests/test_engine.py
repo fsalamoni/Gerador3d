@@ -58,5 +58,33 @@ j = ls.new_job("rigging", prompt="/files/none/model.glb"); store.put(j)
 ls.run_rig(store, j, "/files/none/model.glb")
 check("rig fonte ausente -> failed", store.get(j["id"])["status"] == "failed")
 
+# diagnostics
+d = client.get("/api/local/diagnostics").json()
+check("diagnostics shape", "rigging" in d and "generation" in d and "ready" in d["generation"])
+
+# provision generation (mock o runner pesado para nao instalar de verdade)
+import threading as _th
+def fake_prov(data_dir):
+    ls._pset(progress=100, ok=True); ls._plog("mock done"); ls._pset(active=False, done=True)
+orig = ls.provision_generation
+ls.provision_generation = fake_prov
+try:
+    r = client.post("/api/local/provision", json={"target": "generation"})
+    check("provision start 200", r.status_code == 200)
+    import time as _t
+    for _ in range(20):
+        st = client.get("/api/local/provision/status").json()
+        if st["done"]:
+            break
+        _t.sleep(0.05)
+    st = client.get("/api/local/provision/status").json()
+    check("provision finished ok", st["done"] and st["ok"])
+finally:
+    ls.provision_generation = orig
+
+# target invalido -> 400
+check("provision target invalido -> 400",
+      client.post("/api/local/provision", json={"target": "xpto"}).status_code == 400)
+
 print("\nRESULT:", "ALL PASS" if all(OK) else "SOME FAILED", f"({sum(OK)}/{len(OK)})")
 sys.exit(0 if all(OK) else 1)

@@ -118,7 +118,7 @@ function createWindow() {
   })
   win.loadFile(path.join(__dirname, 'loading.html'))
   waitForHealth(120000, (ok) => {
-    if (ok) win.loadURL(`http://127.0.0.1:${PORT}/`)
+    if (ok) win.loadURL(`http://127.0.0.1:${PORT}/app`) // entra direto no app (sem landing/login)
     else dialog.showErrorBox('Falha ao iniciar', 'O motor local não respondeu a tempo. Veja o console.')
   })
 }

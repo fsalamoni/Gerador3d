@@ -117,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       loading,
-      isDemo: !IS_FIREBASE,
+      isDemo: !IS_FIREBASE && !IS_LOCAL,
       async signInEmail(email, password) {
         if (IS_FIREBASE && auth) {
           await signInWithEmailAndPassword(auth, email, password)

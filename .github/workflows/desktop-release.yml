@@ -6,13 +6,20 @@ name: Build Desktop Installer
 
 on:
   push:
-    tags: ['desktop-v*']          # publique uma nova versão com: git tag desktop-vX.Y.Z && git push --tags
+    tags: ['desktop-v*']          # ou publique com: git tag desktop-vX.Y.Z && git push --tags
+    branches: [main]              # rebuild quando o app desktop/frontend muda
+    paths:
+      - 'desktop/**'
+      - 'frontend/**'
+      - 'worker-rigging/**'
+      - 'worker-3dgen/**'
+      - '.github/workflows/desktop-release.yml'
   workflow_dispatch:               # ou rode manualmente em Actions → Run workflow
     inputs:
       version:
-        description: 'Tag/versão do release (ex.: desktop-v0.1.0)'
+        description: 'Tag/versão do release (ex.: desktop-v0.1.1)'
         required: true
-        default: 'desktop-v0.1.0'
+        default: 'desktop-v0.1.1'
 
 permissions:
   contents: write
@@ -96,7 +103,8 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=desktop-v0.1.0" >> "$GITHUB_OUTPUT"
+            ver=$(node -p "require('./desktop/package.json').version")
+            echo "tag=desktop-v$ver" >> "$GITHUB_OUTPUT"
           fi
 
       # ── Publica o Release com o .exe ────────────────────────────────────────
