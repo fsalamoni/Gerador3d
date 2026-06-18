@@ -29,8 +29,15 @@ Gerador3d/
 │       └── stats.ts        # Contadores de plataforma
 ├── worker-rigging/         # Worker Python local para rigging facial
 │   ├── main.py             # Servidor FastAPI (porta 8000)
-│   ├── rig_script.py       # Script do Blender (bpy)
+│   ├── rig_script.py       # Script do Blender (bpy) — transfer de blendshapes
+│   ├── make_template.py    # Gera template_face.glb (52 shape keys ARKit)
+│   ├── install_vrm_addon.py# Instala o VRM Add-on no Blender (automatico)
+│   ├── tunnel.py           # Tunel publico (cloudflared sem conta / ngrok)
+│   ├── setup.bat           # Setup automatico (uma vez)
 │   └── start.bat           # Um clique para iniciar tudo
+├── worker-3dgen/           # Worker Python local de GERACAO 3D (open-source)
+│   ├── main.py             # Servidor FastAPI (porta 8001)
+│   └── backends.py         # Adaptadores: TripoSR / TRELLIS / Hunyuan3D
 ├── firebase.json           # Config de deploy do Firebase
 ├── firestore.rules         # Regras de segurança do Firestore
 ├── firestore.indexes.json  # Índices do Firestore
@@ -96,7 +103,9 @@ cd worker-rigging && python main.py
    (Surface Deform / Deformation Transfer + export VRM). Requer o template
    facial `template_face.glb` e o VRM Add-on no Blender.
 2. Integração com provedores além do Meshy: ✅ **Tripo** (texto→3D e imagem→3D)
-   implementado no proxy. Faltam Rodin e Hunyuan (APIs com assinatura própria).
+   no proxy; ✅ **geração 3D própria open-source** via `worker-3dgen` (TripoSR/
+   TRELLIS/Hunyuan, sem depender de API paga). Faltam Rodin e Hunyuan como APIs
+   hospedadas (assinatura própria).
 3. Interface de edição de VRM no Estúdio
 4. Testes automatizados (parcial: lógica do Worker + gerador de template cobertos)
 5. ~~Suporte a VRM para exportação final~~ ✅ pipeline do Worker exporta `.vrm`

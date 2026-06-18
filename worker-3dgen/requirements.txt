@@ -1,0 +1,24 @@
+# Servidor (leve) — instale com: pip install -r requirements.txt
+fastapi>=0.110.0
+uvicorn>=0.29.0
+requests>=2.31.0
+pydantic>=2.7.0
+pillow>=10.0.0
+numpy>=1.26.0
+trimesh>=4.0.0
+
+# ── Dependências de IA (NÃO instaladas por este arquivo — variam por GPU/CUDA) ──
+# Instale conforme o backend escolhido (GEN_BACKEND). Exemplos:
+#
+# 1) PyTorch com CUDA (escolha a versão da sua GPU em https://pytorch.org):
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# 2) TripoSR (backend padrão, MIT, imagem→3D):
+#    pip install rembg onnxruntime einops omegaconf transformers
+#    pip install git+https://github.com/VAST-AI-Research/TripoSR.git
+#
+# 3) Texto→3D (passo texto→imagem):
+#    pip install diffusers transformers accelerate
+#
+# 4) TRELLIS (Linux/WSL, 16GB+):  ver https://github.com/microsoft/TRELLIS
+# 5) Hunyuan3D-2.1 (texturas):     ver https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1

@@ -34,6 +34,11 @@ __pycache__/
 worker-rigging/*.glb
 worker-rigging/*.vrm
 worker-rigging/Base
+worker-rigging/cloudflared.exe
+worker-rigging/ngrok.exe
+worker-3dgen/*.glb
+worker-3dgen/*.png
+worker-3dgen/cloudflared.exe
 
 # ...but allow committing the facial rigging template if one is provided
 !worker-rigging/template_face.glb

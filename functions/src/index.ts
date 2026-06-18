@@ -57,18 +57,22 @@ async function loadCreds(uid: string, providerId: string) {
   return { apiKey, baseUrl }
 }
 
-/** Storage path where the local worker uploads the rigged VRM. */
-function riggedVrmPath(uid: string, jobId: string): string {
-  return `antonov3d/users/${uid}/models/${jobId}/model.vrm`
+/** Storage path where a local worker uploads its produced asset. */
+function workerOutputPath(uid: string, jobId: string, filename: string): string {
+  return `antonov3d/users/${uid}/models/${jobId}/${filename}`
 }
 
 /**
- * Signed URL the worker uses to PUT the finished VRM straight into Storage.
+ * Signed URL a local worker uses to PUT a finished asset straight into Storage.
  * The worker sends `Content-Type: application/octet-stream`, so the URL must be
  * signed with the same content type. Short lived — the job finishes in minutes.
  */
-async function createWorkerUploadUrl(uid: string, jobId: string): Promise<string> {
-  const file = getStorage().bucket().file(riggedVrmPath(uid, jobId))
+async function createWorkerUploadUrl(
+  uid: string,
+  jobId: string,
+  filename: string,
+): Promise<string> {
+  const file = getStorage().bucket().file(workerOutputPath(uid, jobId, filename))
   const [url] = await file.getSignedUrl({
     version: 'v4',
     action: 'write',
@@ -78,9 +82,13 @@ async function createWorkerUploadUrl(uid: string, jobId: string): Promise<string
   return url
 }
 
-/** Long-lived signed read URL for the rigged VRM once the worker uploaded it. */
-async function readRiggedVrmUrl(uid: string, jobId: string): Promise<string> {
-  const file = getStorage().bucket().file(riggedVrmPath(uid, jobId))
+/** Long-lived signed read URL for a worker-produced asset once uploaded. */
+async function readWorkerOutputUrl(
+  uid: string,
+  jobId: string,
+  filename: string,
+): Promise<string> {
+  const file = getStorage().bucket().file(workerOutputPath(uid, jobId, filename))
   const [url] = await file.getSignedUrl({
     action: 'read',
     expires: '03-01-2500',
@@ -137,11 +145,13 @@ export const generate3d = onCall(async (request) => {
       throw new HttpsError('unimplemented', `Provider "${providerId}" not implemented yet.`)
     }
 
-    // Self-hosted / local worker dispatch (rigging or other custom tasks)
+    // Self-hosted / local worker dispatch.
+    //  - rigging        → POST /api/rig      (downloadUrl = source model)
+    //  - image/text→3D  → POST /api/generate (your own open-source generator)
     if (providerId === 'selfhost' || providerId === 'local') {
       const creds = await loadCreds(uid, providerId)
       const baseUrl = creds.baseUrl?.replace(/\/+$/, '') // remove trailing slashes
-      
+
       if (!baseUrl) {
         await jobRef.update({
           status: 'failed',
@@ -152,9 +162,11 @@ export const generate3d = onCall(async (request) => {
         throw new HttpsError('failed-precondition', 'Configure a worker URL for the self-hosted provider.')
       }
 
-      // The frontend passes the source model download link as `prompt`.
+      const isRigging = task === 'rigging'
+
+      // Rigging needs a source model URL (passed as `prompt` by the frontend).
       const sourceUrl = data.prompt || ''
-      if (!sourceUrl) {
+      if (isRigging && !sourceUrl) {
         await jobRef.update({
           status: 'failed',
           error: 'No source model URL provided for rigging.',
@@ -164,18 +176,21 @@ export const generate3d = onCall(async (request) => {
         throw new HttpsError('invalid-argument', 'Missing source model URL for rigging.')
       }
 
-      // Pre-sign the destination so the worker can upload the VRM straight into
-      // the user's Storage folder (no service-account key on the worker side).
-      const uploadUrl = await createWorkerUploadUrl(uid, jobId)
+      // Pre-sign the destination so the worker can upload straight into the
+      // user's Storage folder (no service-account key on the worker side).
+      const outFile = isRigging ? 'model.vrm' : 'model.glb'
+      const uploadUrl = await createWorkerUploadUrl(uid, jobId, outFile)
 
-      // Dispatch to the local worker (FastAPI)
-      const workerEndpoint = `${baseUrl}/api/rig`
-      logger.info('Dispatching rigging to local worker:', workerEndpoint)
-
-      const workerPayload = {
-        downloadUrl: sourceUrl,
-        uploadUrl,
-      }
+      const workerEndpoint = isRigging ? `${baseUrl}/api/rig` : `${baseUrl}/api/generate`
+      const workerPayload = isRigging
+        ? { downloadUrl: sourceUrl, uploadUrl }
+        : {
+            task, // 'image_to_3d' | 'text_to_3d'
+            prompt: data.prompt ?? '',
+            imageDataUrl: data.imageDataUrl ?? '',
+            uploadUrl,
+          }
+      logger.info('Dispatching to self-hosted worker:', workerEndpoint)
 
       try {
         const fetch = (await import('node-fetch')).default;
@@ -184,13 +199,13 @@ export const generate3d = onCall(async (request) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(workerPayload),
         })
-        
+
         if (!workerResp.ok) {
           throw new Error(`Worker returned ${workerResp.status}: ${await workerResp.text()}`);
         }
 
         const workerResult = await workerResp.json() as { taskId: string };
-        
+
         await jobRef.update({
           status: 'in_progress',
           progress: 10,
@@ -203,7 +218,7 @@ export const generate3d = onCall(async (request) => {
           },
           updated_at: new Date().toISOString(),
         })
-        
+
         return { jobId }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Worker dispatch failed.'
@@ -325,9 +340,12 @@ export const pollJob3d = onCall(async (request) => {
       if (workerStatus.status === 'succeeded') {
         patch.status = 'succeeded'
         patch.progress = 100
-        // The worker uploaded the VRM to the path we pre-signed at dispatch.
-        // Hand back a long-lived signed read URL for it.
-        patch.outputs = { vrmUrl: await readRiggedVrmUrl(uid, jobId) }
+        // The worker uploaded to the path we pre-signed at dispatch; hand back
+        // a long-lived signed read URL. Rigging → VRM, generation → GLB.
+        const isRigging = (job.params?.taskKey ?? '') === 'rigging'
+        const outFile = isRigging ? 'model.vrm' : 'model.glb'
+        const url = await readWorkerOutputUrl(uid, jobId, outFile)
+        patch.outputs = isRigging ? { vrmUrl: url } : { glbUrl: url }
       } else if (workerStatus.status === 'failed') {
         patch.status = 'failed'
         patch.error = workerStatus.error || 'Worker processing failed'

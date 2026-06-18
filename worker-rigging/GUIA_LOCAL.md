@@ -1,142 +1,95 @@
-# 🪄 Guia Local do Gerador3D — passo a passo para leigos (Windows)
+# 🪄 Guia Local do Gerador3D — agora quase tudo automático (Windows)
 
-Este guia liga o **rigging facial** de ponta a ponta na sua máquina. O site
-(https://antonov3d.web.app) já está no ar; o que roda no seu PC é só o "Worker"
-que abre o Blender e gera o rosto animável (`.vrm`).
-
-> Faça **uma vez** os passos 1–6. No dia a dia, só os passos 7–9.
+O site (https://antonov3d.web.app) já está no ar. No seu PC roda só o **Worker**,
+que abre o Blender e gera o rosto animável (`.vrm`). Quase tudo agora é
+automatizado por **dois arquivos**: `setup.bat` (uma vez) e `start.bat` (sempre).
 
 ---
 
-## Pré-requisitos (o que é cada coisa)
-- **Blender** — programa 3D gratuito. O Worker o usa "invisível" para gerar as
-  expressões. Você já tem em `C:\Program Files\Blender Foundation\Blender 5.1`.
-- **Python** — linguagem que roda o Worker (servidor local na porta 8000).
-- **ngrok** — cria um "túnel" com uma URL pública que liga o site (na nuvem) ao
-  seu PC. Sem ele, a nuvem não alcança seu computador.
-- **VRM Add-on** — plugin do Blender que salva o arquivo `.vrm`.
-- **template_face.glb** — uma "cara modelo" com as 52 expressões ARKit, que o
-  Worker copia para o seu avatar. Geramos com 1 comando (passo 4).
+## O que VOCÊ precisa fazer (resumo)
+1. Instalar o **Python** (1 vez, manual — Windows não deixa automatizar com segurança).
+2. Rodar **`setup.bat`** (1 vez) — ele faz o resto: dependências, instala o **VRM
+   Add-on** no Blender, gera o **template facial** e baixa o **cloudflared** (túnel).
+3. Rodar **`start.bat`** (sempre que for usar) — sobe o Worker e o túnel, e
+   **copia a URL pública automaticamente** para você colar no site.
+4. Colar essa URL em **Configurações → Self-hosted → Base URL** (1 clique).
+5. Usar na **Biblioteca**: **Preparar Rig** → **Abrir Estúdio**.
+
+Pronto. Os detalhes abaixo.
 
 ---
 
-## 1) Instalar o Python
-1. Acesse https://www.python.org/downloads/ e baixe o Python 3.11 (ou superior).
-2. Rode o instalador e, **MUITO IMPORTANTE**, marque a caixa
-   **“Add Python to PATH”** antes de clicar em *Install Now*.
-3. Para testar: abra o **PowerShell** (menu Iniciar → digite "PowerShell") e rode:
-   ```powershell
-   python --version
-   ```
-   Deve aparecer algo como `Python 3.11.x`.
+## 1) Instalar o Python (uma vez — único passo manual de instalação)
+1. Baixe em https://www.python.org/downloads/ (3.11+).
+2. No instalador, **marque “Add Python to PATH”** e clique em *Install Now*.
+3. Confira: abra o **PowerShell** e rode `python --version`.
 
-## 2) Confirmar o Blender
-Você já tem o Blender 5.1. Para confirmar, verifique se existe o arquivo:
-`C:\Program Files\Blender Foundation\Blender 5.1\blender.exe`
-(O Worker encontra o Blender sozinho; não precisa configurar nada.)
+> O Blender 5.1 você já tem. O `setup.bat` o encontra sozinho.
 
-## 3) Instalar o VRM Add-on no Blender (uma vez)
-1. Baixe o add-on em https://vrm-addon-for-blender.info/ (botão de download —
-   baixa um arquivo `.zip`). **Não descompacte o zip.**
-2. Abra o **Blender**.
-3. Menu **Edit → Preferences → Add-ons**.
-4. No canto superior direito, clique na setinha (⌄) e escolha
-   **Install from Disk…** (em versões antigas, é o botão **Install…**).
-5. Selecione o `.zip` que você baixou e confirme.
-6. Marque a caixinha ☑ ao lado de **“VRM format”** para habilitar.
-7. Feche as Preferences. Pode fechar o Blender.
+## 2) Rodar o `setup.bat` (uma vez) — automático
+1. Abra a pasta `worker-rigging` do projeto.
+2. Dê **dois cliques** em **`setup.bat`** (ou rode `.\setup.bat` no PowerShell).
+3. Ele vai, sozinho:
+   - instalar as dependências Python do Worker;
+   - **instalar e habilitar o VRM Add-on** no Blender;
+   - **gerar** o `template_face.glb` (as 52 expressões ARKit);
+   - **baixar o cloudflared** (túnel público que **não precisa de conta**).
+4. Espere aparecer **“SETUP CONCLUIDO!”**.
 
-## 4) Gerar o template facial (uma vez)
-1. Abra o **PowerShell**.
-2. Entre na pasta do Worker (ajuste o caminho para onde você clonou o projeto):
-   ```powershell
-   cd C:\caminho\para\Gerador3d\worker-rigging
-   ```
-3. Rode o gerador (copie a linha inteira):
-   ```powershell
-   & "C:\Program Files\Blender Foundation\Blender 5.1\blender.exe" -b -P make_template.py -- --out template_face.glb
-   ```
-4. Ao terminar, deve existir o arquivo `template_face.glb` dentro de
-   `worker-rigging`. Pronto — esse é o "molde" das 52 expressões.
+> Se ele avisar que não instalou o VRM Add-on automaticamente, veja o
+> **Apêndice A** (instalação manual em 5 cliques).
 
-   > É um template inicial (aproximado). Funciona para testar tudo. Depois você
-   > pode trocar por um rosto ARKit profissional (mesmo nome de arquivo).
+## 3) Rodar o `start.bat` (toda vez que for usar) — automático
+1. Dê **dois cliques** em **`start.bat`**. Abrem 2 janelas:
+   - **“Gerador3D Worker”** — o servidor (mostra Blender e template detectados).
+   - **“Gerador3D Tunnel”** — o túnel. Ele imprime a **URL pública** num quadro
+     e **já a copia para a área de transferência**. Algo como
+     `https://xxxx.trycloudflare.com`.
 
-## 5) Instalar o ngrok (uma vez)
-1. Crie uma conta grátis em https://ngrok.com e baixe o ngrok para Windows.
-2. Descompacte o `ngrok.exe` em uma pasta fácil (ex.: `C:\ngrok`).
-3. No site do ngrok, copie seu **authtoken** (em *Your Authtoken*).
-4. No PowerShell, registre o token (uma vez):
-   ```powershell
-   C:\ngrok\ngrok.exe config add-authtoken SEU_TOKEN_AQUI
-   ```
-5. (Opcional, recomendado) Coloque o `ngrok.exe` no PATH ou na pasta
-   `worker-rigging` para o `start.bat` achá-lo.
+✅ Teste: abra `http://localhost:8000/api/health` no navegador → deve mostrar
+`{"status":"ok", ...}`.
 
-## 6) Instalar as dependências do Worker (uma vez)
-No PowerShell, dentro da pasta `worker-rigging`:
-```powershell
-pip install -r requirements.txt
-```
+## 4) Configurar o site (cole a URL — 1 vez por sessão)
+1. Entre em https://antonov3d.web.app e faça login.
+2. **Configurações** → provedor **“Self-hosted”** → **ative** e **cole** (Ctrl+V)
+   a URL do túnel no campo **Base URL** → **Salve**.
+3. Em **Modelos das Tarefas**, deixe **Rigging → “Local Rigging Worker”**.
+
+> A URL gratuita do túnel **muda** cada vez que você reabre o `start.bat`.
+> Sempre que reiniciar, cole a nova URL (ela é copiada automaticamente).
+
+## 5) Usar — gerar o avatar animável
+1. **Biblioteca** → tenha um `.glb` (faça **upload** ou gere em **Gerar**).
+2. No card, clique **“Preparar Rig”** (ícone de osso) → a barra anda (ao vivo).
+3. Ao terminar, aparece o card **VRM** → **“Abrir Estúdio”** → ligue a webcam. 🎉
 
 ---
 
-## 7) Ligar o Worker (toda vez que for usar)
-Dentro da pasta `worker-rigging`, dê **dois cliques** em **`start.bat`**
-(ou rode `.\start.bat` no PowerShell). Vão abrir duas janelas:
-- **“Gerador3D Worker”** — o servidor. No topo ele mostra:
-  - `Blender detectado em: ...`
-  - `Template facial: ...\template_face.glb` (se aparecer "NÃO ENCONTRADO",
-    refaça o passo 4).
-- **“Gerador3D Ngrok”** — o túnel. Procure a linha **`Forwarding`**, algo como:
-  `https://abcd-123.ngrok-free.app -> http://localhost:8000`
-  **Copie essa URL `https://...ngrok-free.app`.**
+## 🧩 (Opcional) Gerar 3D na sua máquina, sem Meshy/Tripo
+Há um segundo worker, **`worker-3dgen`**, que gera texto→3D / imagem→3D com
+modelos **open-source** (TripoSR por padrão) na sua GPU. Veja
+`worker-3dgen/README.md`. Em resumo: `pip install -r requirements.txt` +
+PyTorch + TripoSR, rode `start.bat` dele (porta 8001), e aponte a **Base URL**
+do Self-hosted para o túnel dele quando for **gerar** (em vez de riggar).
 
-✅ Teste rápido: abra no navegador
-`https://SUA-URL-ngrok.ngrok-free.app/api/health`
-Deve mostrar `{"status":"ok", ...}` com o caminho do template.
-
-## 8) Configurar o site (uma vez, ou quando a URL do ngrok mudar)
-1. Acesse https://antonov3d.web.app e faça login.
-2. Vá em **Configurações** (Settings).
-3. Ache o provedor **“Self-hosted”**, **ative** e cole a URL do ngrok no campo
-   **Base URL**. **Salve.**
-4. Mais abaixo, em **Modelos das Tarefas**, deixe o **Rigging** apontando para
-   **“Local Rigging Worker”**.
-
-   > Atenção: a URL grátis do ngrok **muda** cada vez que você reinicia o ngrok.
-   > Sempre que reabrir o `start.bat`, atualize a Base URL no site.
-
-## 9) Usar — gerar o avatar animável
-1. No site, vá em **Biblioteca**.
-2. Tenha um modelo 3D (`.glb`): faça **upload** de um, ou gere um em
-   **Gerar** (texto→3D / imagem→3D).
-3. No card do modelo, clique em **“Preparar Rig”** (ícone de osso).
-4. A barrinha de progresso vai andar (o Worker está rodando o Blender). Você
-   pode acompanhar o detalhe na janela "Gerador3D Worker".
-5. Ao terminar, aparece um novo card **VRM**. Clique em **“Abrir Estúdio”**.
-6. No **Estúdio**, ligue a webcam — seu rosto controla o avatar. 🎉
-
----
-
-## 🧩 (Opcional) Geração 3D com Tripo
-Além do Meshy, agora dá pra usar o **Tripo** (texto→3D e imagem→3D):
-1. Crie uma conta em https://platform.tripo3d.ai e gere uma **API Key** (`tsk_`).
-2. No site: **Configurações → Tripo → ative e cole a chave**.
-3. Em **Modelos das Tarefas**, escolha um modelo Tripo para *Texto→3D* /
-   *Imagem→3D*. Pronto, é só gerar normalmente.
+## 🧩 (Opcional) Geração com Tripo (API)
+1. Chave em https://platform.tripo3d.ai (`tsk_`).
+2. **Configurações → Tripo** → ative e cole a chave.
+3. Em **Modelos das Tarefas**, escolha um modelo Tripo para Texto/Imagem→3D.
 
 ---
 
 ## 🆘 Problemas comuns
-- **“Template facial não encontrado”** → refaça o passo 4 (o `template_face.glb`
-  precisa estar dentro de `worker-rigging`).
-- **Barra de progresso não anda / “Worker unreachable”** → o `start.bat` não
-  está rodando, ou a Base URL no site está desatualizada (a URL do ngrok mudou).
-  Reabra o `start.bat` e atualize a Base URL.
-- **Falhou com erro de VRM** → confirme o passo 3 (VRM Add-on habilitado). Sem o
-  add-on, o Worker ainda gera um `.glb` com as expressões, mas o ideal é o VRM.
-- **Download do `.vrm` quebrado** → é uma permissão na nuvem (IAM). Peça para
-  conceder o papel **“Service Account Token Creator”** à conta de serviço das
-  Cloud Functions no Google Cloud Console (só uma vez).
-- **Ver o estado do Worker** → abra `http://localhost:8000/api/health`.
+- **Barra não anda / “Worker unreachable”** → `start.bat` parado, ou a Base URL
+  no site está velha (a URL do túnel muda a cada reinício). Reabra e cole de novo.
+- **“Template facial não encontrado”** → rode o `setup.bat` de novo.
+- **Erro de VRM** → veja o Apêndice A. Sem o add-on, ainda sai um `.glb` com as
+  expressões, mas o ideal é o `.vrm`.
+- **Download do `.vrm` quebrado** → conceda o papel **“Service Account Token
+  Creator”** à conta de serviço das Cloud Functions no Google Cloud (1 vez).
+- **Ver o estado do Worker** → `http://localhost:8000/api/health`.
+
+## Apêndice A — instalar o VRM Add-on manualmente (se o setup falhar)
+1. Baixe o `.zip` em https://vrm-addon-for-blender.info/ (não descompacte).
+2. Blender → **Edit → Preferences → Add-ons** → seta (⌄) → **Install from Disk…**
+3. Selecione o `.zip` → marque ☑ **“VRM format”** → feche.
