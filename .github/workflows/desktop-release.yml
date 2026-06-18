@@ -1,0 +1,103 @@
+name: Build Desktop Installer
+
+# Gera o instalador .exe (Windows) com TUDO embutido (UI + motor + Python +
+# Blender) e publica num GitHub Release. Dispare com uma tag "desktop-v*"
+# (ou manualmente em Actions → Run workflow).
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ── Frontend (modo LOCAL, sem Firebase) ─────────────────────────────────
+      - name: Build frontend (local mode)
+        working-directory: frontend
+        env:
+          VITE_LOCAL: 'true'
+        run: |
+          npm ci
+          npm run build:local
+
+      # ── Python embutido (+ dependências do motor) ───────────────────────────
+      - name: Embed Python runtime
+        shell: pwsh
+        run: |
+          $py = "$env:GITHUB_WORKSPACE\desktop\python"
+          New-Item -ItemType Directory -Force -Path $py | Out-Null
+          Invoke-WebRequest "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip" -OutFile "$env:RUNNER_TEMP\py.zip"
+          Expand-Archive "$env:RUNNER_TEMP\py.zip" -DestinationPath $py -Force
+          $pth = Get-ChildItem $py -Filter "python*._pth" | Select-Object -First 1
+          (Get-Content $pth.FullName) -replace '#\s*import site','import site' | Set-Content $pth.FullName
+          Add-Content $pth.FullName "Lib\site-packages"
+          Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:RUNNER_TEMP\get-pip.py"
+          & "$py\python.exe" "$env:RUNNER_TEMP\get-pip.py" --no-warn-script-location
+          & "$py\python.exe" -m pip install --no-warn-script-location -r "$env:GITHUB_WORKSPACE\desktop\requirements.txt"
+          & "$py\python.exe" -c "import fastapi, uvicorn, trimesh, PIL; print('engine deps OK')"
+
+      # ── Blender portátil embutido (+ VRM Add-on + template) ─────────────────
+      # Best-effort: se falhar, o instalador ainda é gerado (rigging usará um
+      # Blender do sistema, se houver). Veja os logs deste passo.
+      - name: Embed Blender (portable) + VRM addon + template
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $idx = Invoke-WebRequest "https://download.blender.org/release/Blender4.2/" -UseBasicParsing
+          $zip = ($idx.Links.href | Where-Object { $_ -match 'blender-4\.2\.\d+-windows-x64\.zip$' } | Sort-Object | Select-Object -Last 1)
+          if (-not $zip) { throw "Blender zip nao encontrado no indice" }
+          Write-Host "Blender: $zip"
+          Invoke-WebRequest "https://download.blender.org/release/Blender4.2/$zip" -OutFile "$env:RUNNER_TEMP\bl.zip"
+          Expand-Archive "$env:RUNNER_TEMP\bl.zip" -DestinationPath "$env:RUNNER_TEMP\bl" -Force
+          $inner = Get-ChildItem "$env:RUNNER_TEMP\bl" -Directory | Select-Object -First 1
+          $dst = "$env:GITHUB_WORKSPACE\desktop\blender"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          Copy-Item "$($inner.FullName)\*" $dst -Recurse -Force
+          $scripts = "$dst\gr3d_scripts"
+          New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+          $env:BLENDER_USER_SCRIPTS = $scripts
+          & "$dst\blender.exe" -b -P "$env:GITHUB_WORKSPACE\worker-rigging\install_vrm_addon.py"
+          & "$dst\blender.exe" -b -P "$env:GITHUB_WORKSPACE\worker-rigging\make_template.py" -- --out "$env:GITHUB_WORKSPACE\worker-rigging\template_face.glb"
+
+      # ── Instalador (electron-builder / NSIS) ────────────────────────────────
+      - name: Build installer
+        working-directory: desktop
+        run: |
+          npm install
+          npm run dist
+
+      - name: List artifacts
+        shell: pwsh
+        run: Get-ChildItem desktop/release | Format-Table Name,Length
+
+      # ── Publica o Release com o .exe ────────────────────────────────────────
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Gerador3D Desktop ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            desktop/release/*.exe
+          body: |
+            **Gerador3D — versão desktop 100% local (Windows).**
+
+            Instalador com TUDO embutido: interface + motor + Python + Blender.
+            Baixe o `.exe`, instale e abra — o app sobe sozinho em `localhost`,
+            sem nuvem, sem túnel, sem login.
+
+            - Upload, visualização 3D, rigging facial e estúdio com webcam: prontos.
+            - Geração 3D por IA (texto/imagem→3D): opcional, baixa os modelos no
+              primeiro uso (precisa de GPU). Ver `worker-3dgen/README.md`.

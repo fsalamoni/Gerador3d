@@ -10,6 +10,11 @@ functions/lib/
 desktop/node_modules/
 desktop/release/
 desktop/pyengine/
+# Embedded runtimes are downloaded/populated by CI — keep only the placeholder.
+desktop/python/*
+!desktop/python/.gitkeep
+desktop/blender/*
+!desktop/blender/.gitkeep
 
 # Env / secrets
 .env

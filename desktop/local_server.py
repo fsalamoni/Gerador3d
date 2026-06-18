@@ -34,7 +34,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-ROOT = Path(__file__).resolve().parent.parent          # raiz do repo
+ROOT = Path(os.environ.get("GR3D_ENGINE_ROOT") or Path(__file__).resolve().parent.parent)
 RIG_DIR = ROOT / "worker-rigging"
 GEN_DIR = ROOT / "worker-3dgen"
 DIST = ROOT / "frontend" / "dist-local"                 # build local da SPA

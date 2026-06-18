@@ -32,7 +32,9 @@
       { "from": "../worker-rigging", "to": "engine/worker-rigging",
         "filter": ["**/*.py", "make_template.py", "*.glb", "*.vrm"] },
       { "from": "../worker-3dgen", "to": "engine/worker-3dgen",
-        "filter": ["**/*.py"] }
+        "filter": ["**/*.py"] },
+      { "from": "python", "to": "engine/python" },
+      { "from": "blender", "to": "engine/blender" }
     ],
     "win": { "target": "nsis" },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }

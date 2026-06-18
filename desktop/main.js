@@ -27,6 +27,20 @@ const VENV_DIR = path.join(app.getPath('userData'), 'pyengine')
 let engine = null
 let win = null
 
+/** Python embutido no instalador (resources/engine/python). Zero pré-requisito. */
+function bundledPython() {
+  const p = process.platform === 'win32'
+    ? path.join(ENGINE_DIR, 'python', 'python.exe')
+    : path.join(ENGINE_DIR, 'python', 'bin', 'python3')
+  return fs.existsSync(p) ? p : null
+}
+
+/** Blender portátil embutido no instalador (resources/engine/blender). */
+function bundledBlender() {
+  const p = path.join(ENGINE_DIR, 'blender', 'blender.exe')
+  return fs.existsSync(p) ? p : null
+}
+
 function venvPython() {
   const p = process.platform === 'win32'
     ? path.join(VENV_DIR, 'Scripts', 'python.exe')
@@ -71,7 +85,8 @@ function waitForHealth(timeoutMs, cb) {
 }
 
 function startEngine() {
-  let py = venvPython()
+  // 1) Python embutido (instalador completo) → 2) venv local → 3) Python do sistema.
+  let py = bundledPython() || venvPython()
   if (!py) {
     const sysPy = systemPython()
     if (!sysPy) {
@@ -82,10 +97,16 @@ function startEngine() {
     }
     py = bootstrapPython(sysPy) || sysPy
   }
-  engine = spawn(py, [SERVER, '--port', String(PORT)], {
-    cwd: ENGINE_DIR,
-    env: { ...process.env, GR3D_PORT: String(PORT) },
-  })
+
+  const env = { ...process.env, GR3D_PORT: String(PORT), GR3D_ENGINE_ROOT: ENGINE_DIR }
+  const blender = bundledBlender()
+  if (blender) {
+    env.BLENDER_PATH = blender // rigging funciona sem instalar Blender
+    // O VRM Add-on é empacotado junto (instalado nesta pasta de scripts no CI).
+    env.BLENDER_USER_SCRIPTS = path.join(ENGINE_DIR, 'blender', 'gr3d_scripts')
+  }
+
+  engine = spawn(py, [SERVER, '--port', String(PORT)], { cwd: ENGINE_DIR, env })
   engine.stdout.on('data', (d) => process.stdout.write(`[engine] ${d}`))
   engine.stderr.on('data', (d) => process.stderr.write(`[engine] ${d}`))
 }
