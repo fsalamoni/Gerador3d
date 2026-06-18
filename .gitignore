@@ -24,3 +24,8 @@ Thumbs.db
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Worker temp files
+worker-rigging/*.glb
+worker-rigging/*.vrm
+worker-rigging/Base
