@@ -27,6 +27,8 @@ export default function GeneratePage() {
   const [busy, setBusy] = useState(false)
   const [activeJob, setActiveJob] = useState<GenerationJob | null>(null)
   const [modelId, setModelId] = useState<string>('')
+  // Quality preset (local mode) → marching-cubes resolution.
+  const [quality, setQuality] = useState<256 | 384 | 512>(384)
 
   const task: TaskKey = mode === 'text' ? 'text_to_3d' : 'image_to_3d'
 
@@ -72,6 +74,7 @@ export default function GeneratePage() {
         task,
         prompt: mode === 'text' ? prompt : undefined,
         imageDataUrl: mode === 'image' ? imageDataUrl ?? undefined : undefined,
+        extra: IS_LOCAL ? { mcResolution: quality } : undefined,
       })
       setActiveJob({
         id: jobId,
@@ -148,6 +151,12 @@ export default function GeneratePage() {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const file = e.dataTransfer.files?.[0]
+                  if (file && file.type.startsWith('image/')) onPickImage(file)
+                }}
                 className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/15 bg-slate-800/40 px-4 py-10 text-sm text-slate-400 transition hover:border-brand-500/50 hover:text-slate-200"
               >
                 {imageDataUrl ? (
@@ -215,6 +224,33 @@ export default function GeneratePage() {
                 <Settings className="h-3 w-3" />
                 {t('generate.configure')}
               </Link>
+            </div>
+          )}
+
+          {IS_LOCAL && genReady && (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-500">
+                Qualidade
+              </label>
+              <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1">
+                {([['Rápido', 256], ['Equilibrado', 384], ['Alto', 512]] as const).map(
+                  ([label, res]) => (
+                    <button
+                      key={res}
+                      type="button"
+                      onClick={() => setQuality(res)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                        quality === res ? 'bg-brand-600 text-white' : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ),
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Mais qualidade = mais detalhe, porém mais lento e mais VRAM.
+              </p>
             </div>
           )}
 

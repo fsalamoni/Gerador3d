@@ -29,7 +29,7 @@ client.delete(f"/api/local/jobs/{job['id']}")
 check("deleted", client.get(f"/api/local/jobs/{job['id']}").status_code == 404)
 
 # generate (mock backend)
-def gen_ok(backend_name, task, prompt, image_path, out_path, progress=None):
+def gen_ok(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
     if progress: progress(60)
     Path(out_path).write_bytes(b"GLB" * 40)
 with mock.patch.object(ls.genbackends, "generate", side_effect=gen_ok):
@@ -85,6 +85,25 @@ finally:
 # target invalido -> 400
 check("provision target invalido -> 400",
       client.post("/api/local/provision", json={"target": "xpto"}).status_code == 400)
+
+# config get/set backend
+cfg = client.get("/api/local/config").json()
+check("config has backend + list", "backend" in cfg and isinstance(cfg.get("backends"), list))
+client.post("/api/local/config", json={"backend": "triposr"})
+check("config set persists", client.get("/api/local/config").json()["backend"] == "triposr")
+
+# generate honra params (mock recebe params)
+seen = {}
+def gen_capture(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
+    seen["backend"] = backend_name; seen["params"] = params or {}
+    Path(out_path).write_bytes(b"GLB" * 10)
+with mock.patch.object(ls.genbackends, "generate", side_effect=gen_capture):
+    j = ls.new_job("text_to_3d", prompt="carro")
+    j["params"]["_genParams"] = {"mcResolution": 512, "removeBg": True}
+    j["params"]["_backend"] = "triposr"
+    store.put(j); ls.run_generate(store, j)
+check("generate passa mcResolution", seen.get("params", {}).get("mcResolution") == 512)
+check("generate usa backend escolhido", seen.get("backend") == "triposr")
 
 print("\nRESULT:", "ALL PASS" if all(OK) else "SOME FAILED", f"({sum(OK)}/{len(OK)})")
 sys.exit(0 if all(OK) else 1)

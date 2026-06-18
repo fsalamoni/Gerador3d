@@ -18,6 +18,9 @@ export async function localGenerate(input: {
   task: TaskKey
   prompt?: string
   imageDataUrl?: string
+  mcResolution?: number
+  seed?: number
+  backend?: string
 }): Promise<{ jobId: string }> {
   const res = await fetch(`${LOCAL_API}/generate`, {
     method: 'POST',
@@ -26,9 +29,24 @@ export async function localGenerate(input: {
       task: input.task,
       prompt: input.prompt ?? '',
       imageDataUrl: input.imageDataUrl ?? '',
+      mcResolution: input.mcResolution ?? 0,
+      seed: input.seed ?? -1,
+      backend: input.backend ?? '',
     }),
   })
   return asJson(res)
+}
+
+export async function localGetConfig(): Promise<{ backend: string; backends: string[] }> {
+  return asJson(await fetch(`${LOCAL_API}/config`))
+}
+
+export async function localSetBackend(backend: string): Promise<void> {
+  await asJson(await fetch(`${LOCAL_API}/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ backend }),
+  }))
 }
 
 export async function localRig(sourceUrl: string): Promise<{ jobId: string }> {

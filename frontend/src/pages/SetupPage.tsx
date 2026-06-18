@@ -14,8 +14,15 @@ import {
 import { IS_LOCAL } from '../lib/runtime'
 import {
   localDiagnostics, localProvision, localProvisionStatus,
+  localGetConfig, localSetBackend,
   type LocalDiagnostics, type ProvisionStatus,
 } from '../lib/local-api'
+
+const BACKEND_LABELS: Record<string, string> = {
+  triposr: 'TripoSR (rápido · recomendado)',
+  hunyuan: 'Hunyuan3D (texturas · avançado)',
+  trellis: 'TRELLIS (qualidade · Linux/WSL)',
+}
 
 function Dot({ ok }: { ok: boolean }) {
   return ok
@@ -28,12 +35,15 @@ export default function SetupPage() {
   const [prov, setProv] = useState<ProvisionStatus | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [backend, setBackend] = useState<string>('')
+  const [backends, setBackends] = useState<string[]>([])
   const logRef = useRef<HTMLPreElement>(null)
 
   const refreshDiag = () => { void localDiagnostics().then(setDiag).catch(() => {}) }
 
   useEffect(() => {
     if (!IS_LOCAL) return
+    void localGetConfig().then((c) => { setBackend(c.backend); setBackends(c.backends) }).catch(() => {})
     refreshDiag()
     // Poll do status de instalação (e re-checa o diagnóstico quando termina).
     let lastActive = false
@@ -139,6 +149,28 @@ export default function SetupPage() {
           </div>
           <StatusBadge ready={!!gen?.ready} />
         </div>
+        {backends.length > 1 && (
+          <div className="mt-4">
+            <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-slate-500">
+              Modelo de geração
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {backends.map((b) => (
+                <button
+                  key={b}
+                  onClick={() => { void localSetBackend(b).then(() => setBackend(b)) }}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                    backend === b
+                      ? 'border-brand-500/50 bg-brand-600/15 text-brand-100'
+                      : 'border-white/10 bg-slate-800/40 text-slate-300 hover:bg-slate-800/70'
+                  }`}
+                >
+                  {BACKEND_LABELS[b] ?? b}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <button
           disabled={busy}
           onClick={() => install('generation')}
@@ -149,6 +181,7 @@ export default function SetupPage() {
         </button>
         <p className="mt-2 text-xs text-slate-500">
           Baixa ~2,5 GB (PyTorch) + o modelo. Pode levar vários minutos.
+          {backend === 'hunyuan' && ' Hunyuan é avançado (mais VRAM; pode exigir setup manual — ver guia).'}
         </p>
       </section>
 

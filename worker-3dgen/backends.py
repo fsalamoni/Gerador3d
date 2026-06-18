@@ -110,9 +110,23 @@ def _install_mcubes_shim():
     print("[backends] usando PyMCubes (sem compilar torchmcubes).", flush=True)
 
 
-def _triposr(task, prompt, image_path, out_path, progress):
+def _triposr(task, prompt, image_path, out_path, progress, params=None):
     import torch
     from PIL import Image
+    params = params or {}
+
+    # Parâmetros de qualidade (pesquisa: mc-resolution 256→512 + remoção de fundo
+    # + foreground-ratio são as alavancas que mais melhoram o resultado).
+    resolution = int(params.get("mcResolution") or os.environ.get("TRIPOSR_RES", "320"))
+    resolution = max(64, min(512, resolution))
+    fg_ratio = float(params.get("foregroundRatio") or 0.85)
+    remove_bg = params.get("removeBg", True)
+    seed = params.get("seed")
+    if seed is not None:
+        try:
+            torch.manual_seed(int(seed))
+        except Exception:
+            pass
 
     if progress:
         progress(20, "carregando TripoSR")
@@ -138,21 +152,22 @@ def _triposr(task, prompt, image_path, out_path, progress):
     if progress:
         progress(45, "pré-processando imagem")
     image = Image.open(image_path).convert("RGB")
-    # Remoção de fundo (opcional — melhora muito o resultado).
-    try:
-        import rembg
-        from tsr.utils import remove_background, resize_foreground
-        image = remove_background(image, rembg.new_session())
-        image = resize_foreground(image, 0.85)
-    except Exception:
-        pass  # segue sem remoção de fundo
+    # Remoção de fundo (melhora muito o resultado).
+    if remove_bg:
+        try:
+            import rembg
+            from tsr.utils import remove_background, resize_foreground
+            image = remove_background(image, rembg.new_session())
+            image = resize_foreground(image, fg_ratio)
+        except Exception:
+            pass  # segue sem remoção de fundo
 
     if progress:
-        progress(60, "reconstruindo 3D")
+        progress(60, f"reconstruindo 3D (res {resolution})")
     device = "cuda" if cuda_available() else "cpu"
     with torch.no_grad():
         scene_codes = model([image], device=device)
-    meshes = model.extract_mesh(scene_codes, resolution=int(os.environ.get("TRIPOSR_RES", "256")))
+    meshes = model.extract_mesh(scene_codes, resolution=resolution)
 
     if progress:
         progress(88, "exportando GLB")
@@ -164,8 +179,9 @@ def _triposr(task, prompt, image_path, out_path, progress):
 # https://github.com/microsoft/TRELLIS
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _trellis(task, prompt, image_path, out_path, progress):
+def _trellis(task, prompt, image_path, out_path, progress, params=None):
     from PIL import Image
+    params = params or {}
 
     if progress:
         progress(20, "carregando TRELLIS")
@@ -199,10 +215,12 @@ def _trellis(task, prompt, image_path, out_path, progress):
 # https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _hunyuan(task, prompt, image_path, out_path, progress):
+def _hunyuan(task, prompt, image_path, out_path, progress, params=None):
+    params = params or {}
     if progress:
         progress(20, "carregando Hunyuan3D")
     if "hunyuan" not in _MODELS:
+        _ensure_local_repo_on_path("Hunyuan3D-2", "Hunyuan3D-2.1", "Hunyuan3D-2GP")
         from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
         pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             os.environ.get("HUNYUAN_MODEL", "tencent/Hunyuan3D-2.1"))
@@ -228,7 +246,7 @@ _BACKENDS = {
 }
 
 
-def generate(backend_name, task, prompt, image_path, out_path, progress=None):
+def generate(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
     """Dispatcher: roda o backend escolhido para produzir out_path (.glb)."""
     fn = _BACKENDS.get((backend_name or "triposr").lower())
     if fn is None:
@@ -236,4 +254,4 @@ def generate(backend_name, task, prompt, image_path, out_path, progress=None):
             f"Backend '{backend_name}' desconhecido. "
             f"Opções: {', '.join(_BACKENDS)}."
         )
-    fn(task, prompt, image_path, out_path, progress)
+    fn(task, prompt, image_path, out_path, progress, params or {})

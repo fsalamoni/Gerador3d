@@ -57,10 +57,14 @@ export async function startGeneration(input: StartGenerationInput): Promise<stri
       const { jobId: rid } = await localRig(input.prompt ?? '')
       return rid
     }
+    const extra = input.extra ?? {}
     const { jobId: gid } = await localGenerate({
       task: input.task,
       prompt: input.prompt,
       imageDataUrl: input.imageDataUrl,
+      mcResolution: typeof extra.mcResolution === 'number' ? extra.mcResolution : undefined,
+      seed: typeof extra.seed === 'number' ? extra.seed : undefined,
+      backend: typeof extra.backend === 'string' ? extra.backend : undefined,
     })
     return gid
   }

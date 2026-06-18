@@ -162,6 +162,8 @@ def run_generate(store: Store, job):
     task = job["params"]["taskKey"]
     prompt = job["params"].get("prompt", "")
     img = job["params"].pop("_imageDataUrl", "")
+    gen_params = job["params"].pop("_genParams", {}) or {}
+    backend = job["params"].pop("_backend", "") or current_backend(store.dir)
 
     store.update(jid, status="in_progress", progress=5)
     try:
@@ -171,9 +173,10 @@ def run_generate(store: Store, job):
         if task == "text_to_3d" and not prompt.strip():
             raise ValueError("text_to_3d requer um prompt.")
         genbackends.generate(
-            backend_name=GEN_BACKEND, task=task, prompt=prompt,
+            backend_name=backend, task=task, prompt=prompt,
             image_path=str(image_path) if have_img else "", out_path=str(out),
             progress=lambda p, _m="": store.update(jid, progress=max(5, min(95, int(p)))),
+            params=gen_params,
         )
         if not out.exists() or out.stat().st_size == 0:
             raise RuntimeError("O backend não gerou o .glb.")
@@ -483,7 +486,7 @@ def diagnostics(data_dir: Path):
             "ready": bool(torch_ok and triposr_ok),
         },
         "python": sys.executable,
-        "backend": GEN_BACKEND,
+        "backend": current_backend(data_dir),
     }
 
 
@@ -495,10 +498,43 @@ class GenBody(BaseModel):
     task: str
     prompt: str = ""
     imageDataUrl: str = ""
+    backend: str = ""          # vazio = backend padrão (config/env)
+    mcResolution: int = 0      # 0 = padrão; qualidade da malha (256/384/512)
+    foregroundRatio: float = 0.0
+    removeBg: bool = True
+    seed: int = -1
 
 
 class ProvisionBody(BaseModel):
     target: str  # 'generation' | 'blender'
+
+
+class ConfigBody(BaseModel):
+    backend: str
+
+
+def current_backend(data_dir: Path) -> str:
+    cfg = data_dir / "engine_config.json"
+    if cfg.exists():
+        try:
+            b = json.loads(cfg.read_text("utf-8")).get("backend")
+            if b:
+                return b
+        except Exception:
+            pass
+    return GEN_BACKEND
+
+
+def set_backend(data_dir: Path, backend: str):
+    cfg = data_dir / "engine_config.json"
+    data = {}
+    if cfg.exists():
+        try:
+            data = json.loads(cfg.read_text("utf-8"))
+        except Exception:
+            data = {}
+    data["backend"] = backend
+    cfg.write_text(json.dumps(data), "utf-8")
 
 
 class RigBody(BaseModel):
@@ -544,10 +580,28 @@ def create_app(data_dir: Path) -> FastAPI:
     @app.post("/api/local/generate")
     def generate(body: GenBody):
         job = new_job(body.task, prompt=body.prompt, has_image=bool(body.imageDataUrl))
-        job["params"]["_imageDataUrl"] = body.imageDataUrl  # transiente, não persistido após uso
+        params = {"removeBg": body.removeBg}
+        if body.mcResolution:
+            params["mcResolution"] = int(body.mcResolution)
+        if body.foregroundRatio:
+            params["foregroundRatio"] = float(body.foregroundRatio)
+        if body.seed is not None and body.seed >= 0:
+            params["seed"] = int(body.seed)
+        job["params"]["_imageDataUrl"] = body.imageDataUrl  # transiente
+        job["params"]["_genParams"] = params
+        job["params"]["_backend"] = body.backend or current_backend(data_dir)
         store.put(job)
         spawn(run_generate, store, job)
         return {"jobId": job["id"]}
+
+    @app.get("/api/local/config")
+    def get_config():
+        return {"backend": current_backend(data_dir), "backends": list(genbackends._BACKENDS)}
+
+    @app.post("/api/local/config")
+    def post_config(body: ConfigBody):
+        set_backend(data_dir, body.backend)
+        return {"ok": True, "backend": body.backend}
 
     @app.post("/api/local/rig")
     def rig(body: RigBody):
