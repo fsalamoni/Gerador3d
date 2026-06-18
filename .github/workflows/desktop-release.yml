@@ -8,6 +8,11 @@ on:
   push:
     tags: ['desktop-v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag/versão do release (ex.: desktop-v0.1.0)'
+        required: true
+        default: 'desktop-v0.1.0'
 
 permissions:
   contents: write
@@ -85,8 +90,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Gerador3D Desktop ${{ github.ref_name }}
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: Gerador3D Desktop ${{ github.event.inputs.version || github.ref_name }}
           draft: false
           prerelease: false
           files: |
