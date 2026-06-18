@@ -38,6 +38,9 @@ Gerador3d/
 ├── worker-3dgen/           # Worker Python local de GERACAO 3D (open-source)
 │   ├── main.py             # Servidor FastAPI (porta 8001)
 │   └── backends.py         # Adaptadores: TripoSR / TRELLIS / Hunyuan3D
+├── worker-gateway/         # Gateway local: 1 URL serve rigging + geracao
+│   ├── gateway.py          # FastAPI (porta 8080) -> 8000 e 8001
+│   └── start_all.bat       # Sobe tudo (workers + gateway + tunel)
 ├── firebase.json           # Config de deploy do Firebase
 ├── firestore.rules         # Regras de segurança do Firestore
 ├── firestore.indexes.json  # Índices do Firestore

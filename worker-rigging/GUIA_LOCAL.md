@@ -65,6 +65,15 @@ Pronto. Os detalhes abaixo.
 
 ---
 
+## ⭐ Atalho recomendado: "tudo de uma vez" (1 URL para tudo)
+Se você quer **rigging e geração 3D ao mesmo tempo**, sem ficar trocando a URL:
+em vez do `start.bat`, rode **`worker-gateway/start_all.bat`**. Ele sobe os dois
+workers + um **gateway** + **um único túnel**, e você cola **uma só Base URL** no
+site (vale para tudo). Detalhes em `worker-gateway/README.md`.
+
+> Diagnóstico a qualquer momento: `python worker-rigging/doctor.py` — ele lista,
+> em português, o que está OK e o que falta.
+
 ## 🧩 (Opcional) Gerar 3D na sua máquina, sem Meshy/Tripo
 Há um segundo worker, **`worker-3dgen`**, que gera texto→3D / imagem→3D com
 modelos **open-source** (TripoSR por padrão) na sua GPU. Veja

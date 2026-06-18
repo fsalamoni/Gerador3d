@@ -9,13 +9,22 @@ echo   GERADOR3D - SETUP AUTOMATICO (rode uma vez)
 echo ============================================================
 echo.
 
-REM ── 1. Python ──────────────────────────────────────────────
+REM ── 1. Python (tenta instalar via winget se faltar) ───────
 where python >nul 2>&1
 if errorlevel 1 (
-  echo [ERRO] Python nao encontrado no PATH.
-  echo Instale o Python 3.11+ em https://www.python.org/downloads/
-  echo e MARQUE "Add Python to PATH". Depois rode este setup de novo.
-  pause & exit /b 1
+  echo [..] Python nao encontrado. Tentando instalar via winget...
+  where winget >nul 2>&1
+  if errorlevel 1 (
+    echo [ERRO] Python e winget ausentes.
+    echo Instale o Python 3.11+ em https://www.python.org/downloads/
+    echo e MARQUE "Add Python to PATH". Depois rode este setup de novo.
+    pause & exit /b 1
+  )
+  winget install -e --id Python.Python.3.11 --accept-source-agreements --accept-package-agreements
+  echo.
+  echo [i] Python instalado. FECHE esta janela, abra de novo o setup.bat
+  echo     (para o PATH atualizar). Depois ele segue do zero.
+  pause & exit /b 0
 )
 echo [OK] Python encontrado.
 
