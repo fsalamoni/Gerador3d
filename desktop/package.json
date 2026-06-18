@@ -1,0 +1,40 @@
+{
+  "name": "gerador3d-desktop",
+  "productName": "Gerador3D",
+  "version": "0.1.0",
+  "description": "Gerador3D — versão desktop 100% local (sem nuvem, sem túnel).",
+  "main": "main.js",
+  "author": "Gerador3D",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "app.gerador3d.desktop",
+    "productName": "Gerador3D",
+    "directories": { "output": "release" },
+    "files": [
+      "main.js",
+      "preload.js",
+      "loading.html",
+      "setup.bat"
+    ],
+    "extraResources": [
+      { "from": "local_server.py", "to": "engine/local_server.py" },
+      { "from": "requirements.txt", "to": "engine/requirements.txt" },
+      { "from": "../frontend/dist-local", "to": "engine/frontend/dist-local" },
+      { "from": "../worker-rigging", "to": "engine/worker-rigging",
+        "filter": ["**/*.py", "make_template.py", "*.glb", "*.vrm"] },
+      { "from": "../worker-3dgen", "to": "engine/worker-3dgen",
+        "filter": ["**/*.py"] }
+    ],
+    "win": { "target": "nsis" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

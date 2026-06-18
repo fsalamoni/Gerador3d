@@ -10,12 +10,14 @@
  */
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { IS_FIREBASE, auth, db } from './firebase'
+import { IS_LOCAL } from './runtime'
 import type { UserSettingsData } from './firestore-types'
 
 const DEMO_SETTINGS_PREFIX = 'gerador3d_settings_'
 
 /** Returns the current authenticated user id, or a demo fallback. */
 export function getCurrentUserId(): string | undefined {
+  if (IS_LOCAL) return 'local'
   if (IS_FIREBASE && auth) return auth.currentUser?.uid
   try {
     const raw = localStorage.getItem('gerador3d_demo_user')

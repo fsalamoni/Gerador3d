@@ -24,6 +24,7 @@ import {
   type User,
 } from 'firebase/auth'
 import { ADMIN_EMAIL, IS_FIREBASE, auth } from '../lib/firebase'
+import { IS_LOCAL } from '../lib/runtime'
 import type { UserRole } from '../lib/firestore-types'
 
 export interface AuthUser {
@@ -60,6 +61,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (IS_LOCAL) {
+      // Desktop app: no login needed — the app is the user's own machine.
+      setUser({
+        uid: 'local',
+        email: 'local@gerador3d.app',
+        displayName: 'Você',
+        role: ADMIN_EMAIL ? 'admin' : 'user',
+      })
+      setLoading(false)
+      return undefined
+    }
+
     if (IS_FIREBASE && auth) {
       const unsub = onAuthStateChanged(auth, (fbUser) => {
         setUser(fbUser ? toAuthUser(fbUser) : null)

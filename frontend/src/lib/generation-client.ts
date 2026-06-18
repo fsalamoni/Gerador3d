@@ -9,6 +9,8 @@
  */
 import { httpsCallable } from 'firebase/functions'
 import { IS_FIREBASE, functions } from './firebase'
+import { IS_LOCAL } from './runtime'
+import { localGenerate, localRig } from './local-api'
 import { getSettings } from './firestore-service'
 import { getDefaultTaskModels, type TaskKey } from './tasks-3d'
 import { resolveProviderForModel } from './provider-credentials'
@@ -48,6 +50,20 @@ export async function startGeneration(input: StartGenerationInput): Promise<stri
   const jobId = newId()
 
   track('generation_started', { task: input.task, providerId, modelId })
+
+  // Local desktop engine — everything runs offline on this machine.
+  if (IS_LOCAL) {
+    if (input.task === 'rigging') {
+      const { jobId: rid } = await localRig(input.prompt ?? '')
+      return rid
+    }
+    const { jobId: gid } = await localGenerate({
+      task: input.task,
+      prompt: input.prompt,
+      imageDataUrl: input.imageDataUrl,
+    })
+    return gid
+  }
 
   const baseJob: GenerationJob = {
     id: jobId,
@@ -91,6 +107,7 @@ export async function startGeneration(input: StartGenerationInput): Promise<stri
 
 /** Advance a Firebase job by asking the proxy to poll the provider once. */
 export async function pollJobOnce(jobId: string): Promise<GenerationJob | null> {
+  if (IS_LOCAL) return getJob(jobId) // local engine advances jobs server-side
   if (IS_FIREBASE && functions) {
     const call = httpsCallable<{ jobId: string }, GenerationJob>(functions, 'pollJob3d')
     const res = await call({ jobId })

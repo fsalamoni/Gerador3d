@@ -1,0 +1,62 @@
+"""Testes do motor local (sem Blender/modelo real). Rode: python tests/test_engine.py"""
+import sys, tempfile, importlib.util
+from pathlib import Path
+from unittest import mock
+
+DESK = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("local_server", str(DESK / "local_server.py"))
+ls = importlib.util.module_from_spec(spec); spec.loader.exec_module(ls)
+from fastapi.testclient import TestClient  # noqa: E402
+
+OK = []
+def check(n, c): print(("PASS" if c else "FAIL"), "-", n); OK.append(bool(c))
+
+data = Path(tempfile.mkdtemp(prefix="gr3d_eng_"))
+client = TestClient(ls.create_app(data))
+store = ls.Store(data)
+
+check("health ok", client.get("/api/local/health").json().get("status") == "ok")
+
+# upload + serve
+r = client.post("/api/local/upload", files={"file": ("a.glb", b"GLB" * 30, "model/gltf-binary")})
+job = r.json()
+check("upload succeeded", r.status_code == 200 and job["status"] == "succeeded"
+      and job["outputs"]["glbUrl"].endswith("model.glb"))
+check("file served", client.get(job["outputs"]["glbUrl"]).status_code == 200)
+check("jobs list", any(j["id"] == job["id"] for j in client.get("/api/local/jobs").json()))
+check("job 404", client.get("/api/local/jobs/nope").status_code == 404)
+client.delete(f"/api/local/jobs/{job['id']}")
+check("deleted", client.get(f"/api/local/jobs/{job['id']}").status_code == 404)
+
+# generate (mock backend)
+def gen_ok(backend_name, task, prompt, image_path, out_path, progress=None):
+    if progress: progress(60)
+    Path(out_path).write_bytes(b"GLB" * 40)
+with mock.patch.object(ls.genbackends, "generate", side_effect=gen_ok):
+    j = ls.new_job("text_to_3d", prompt="a red car"); store.put(j); ls.run_generate(store, j)
+check("generate succeeded", store.get(j["id"])["status"] == "succeeded")
+
+j = ls.new_job("image_to_3d"); j["params"]["_imageDataUrl"] = ""; store.put(j); ls.run_generate(store, j)
+check("image sem imagem -> failed", store.get(j["id"])["status"] == "failed")
+
+# rig (mock Blender)
+src = data / "src.glb"; src.write_bytes(b"SRC" * 20)
+class FakePopen:
+    def __init__(self, cmd, **k):
+        self.returncode = 0
+        Path(cmd[cmd.index("--out") + 1]).write_bytes(b"VRM" * 40)
+        self.stdout = iter(["PROGRESS: 50 x\n", "PROGRESS: 100 y\n"])
+    def wait(self): return 0
+with mock.patch.object(ls.subprocess, "Popen", lambda cmd, **k: FakePopen(cmd, **k)), \
+     mock.patch.object(ls.rigmod, "find_blender", return_value="blender"), \
+     mock.patch.object(ls.rigmod, "find_template", return_value=""):
+    j = ls.new_job("rigging", prompt=str(src)); store.put(j); ls.run_rig(store, j, str(src))
+check("rig succeeded", store.get(j["id"])["status"] == "succeeded"
+      and store.get(j["id"])["outputs"]["vrmUrl"].endswith("model.vrm"))
+
+j = ls.new_job("rigging", prompt="/files/none/model.glb"); store.put(j)
+ls.run_rig(store, j, "/files/none/model.glb")
+check("rig fonte ausente -> failed", store.get(j["id"])["status"] == "failed")
+
+print("\nRESULT:", "ALL PASS" if all(OK) else "SOME FAILED", f"({sum(OK)}/{len(OK)})")
+sys.exit(0 if all(OK) else 1)

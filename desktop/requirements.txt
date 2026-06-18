@@ -1,0 +1,16 @@
+# Dependências do motor local (engine). Instaladas automaticamente no 1º uso.
+fastapi>=0.110.0
+uvicorn>=0.29.0
+requests>=2.31.0
+pydantic>=2.7.0
+python-multipart>=0.0.9
+pillow>=10.0.0
+numpy>=1.26.0
+trimesh>=4.0.0
+
+# Geração 3D (opcional, conforme GEN_BACKEND) — instale separadamente porque
+# dependem da sua GPU/CUDA (ver worker-3dgen/README.md):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   pip install rembg onnxruntime einops omegaconf transformers
+#   pip install git+https://github.com/VAST-AI-Research/TripoSR.git
+# Rigging usa o Blender (instalado à parte) — ver worker-rigging/GUIA_LOCAL.md.

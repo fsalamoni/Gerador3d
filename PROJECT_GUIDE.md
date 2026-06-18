@@ -41,6 +41,9 @@ Gerador3d/
 ├── worker-gateway/         # Gateway local: 1 URL serve rigging + geracao
 │   ├── gateway.py          # FastAPI (porta 8080) -> 8000 e 8001
 │   └── start_all.bat       # Sobe tudo (workers + gateway + tunel)
+├── desktop/                # App de PC 100% LOCAL (Electron) — sem nuvem/tunel
+│   ├── main.js             # Electron: sobe o motor e mostra a UI
+│   └── local_server.py     # Motor local (SPA + jobs + rigging + geracao)
 ├── firebase.json           # Config de deploy do Firebase
 ├── firestore.rules         # Regras de segurança do Firestore
 ├── firestore.indexes.json  # Índices do Firestore
@@ -112,6 +115,14 @@ cd worker-rigging && python main.py
 3. Interface de edição de VRM no Estúdio
 4. Testes automatizados (parcial: lógica do Worker + gerador de template cobertos)
 5. ~~Suporte a VRM para exportação final~~ ✅ pipeline do Worker exporta `.vrm`
+
+## Versão Desktop (alternativa 100% local)
+- `desktop/` é um app Electron que roda **tudo offline**: UI + jobs + rigging +
+  geração, sem Firebase, sem túnel, sem login. O frontend é compilado com
+  `VITE_LOCAL=true` e fala REST com `desktop/local_server.py` (porta 8765).
+- Build do instalador: `desktop/build.bat`. Dev: `desktop/dev.bat`.
+- Os branches de modo local no frontend ficam atrás de `IS_LOCAL`
+  (`frontend/src/lib/runtime.ts`), então a versão cloud não é afetada.
 
 ## Notas de arquitetura (importante)
 - O cliente **precisa** acionar `pollJob3d` periodicamente para a Cloud Function

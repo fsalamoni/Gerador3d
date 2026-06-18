@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Gerador3D</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: #0b1020; color: #cbd5e1;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px;
+    }
+    .logo { width: 64px; height: 64px; border-radius: 18px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+    .spin { width: 26px; height: 26px; border: 3px solid #334155;
+      border-top-color: #818cf8; border-radius: 50%; animation: s 0.9s linear infinite; }
+    @keyframes s { to { transform: rotate(360deg); } }
+    h1 { font-size: 18px; font-weight: 700; color: #fff; margin: 0; }
+    p { font-size: 13px; color: #94a3b8; margin: 0; max-width: 420px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="logo"></div>
+  <h1>Gerador3D</h1>
+  <div class="spin"></div>
+  <p>Iniciando o motor local… Na primeira vez pode demorar um pouco
+     (preparando o ambiente Python). Tudo roda no seu computador.</p>
+</body>
+</html>

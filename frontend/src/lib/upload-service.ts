@@ -1,10 +1,18 @@
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { IS_FIREBASE, storage } from './firebase'
+import { IS_LOCAL } from './runtime'
+import { localUpload } from './local-api'
 import { getCurrentUserId } from './firestore-service'
 import { createJob, updateJob } from './jobs-store'
 import type { GenerationJob } from './firestore-types'
 
 export async function upload3DModel(file: File, onProgress?: (progress: number) => void): Promise<GenerationJob> {
+  // Local desktop engine — upload straight to the local server.
+  if (IS_LOCAL) {
+    onProgress?.(100)
+    return localUpload(file)
+  }
+
   const uid = getCurrentUserId()
   if (!uid) throw new Error('User not authenticated')
 

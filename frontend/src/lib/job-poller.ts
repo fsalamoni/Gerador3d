@@ -13,6 +13,7 @@
  */
 import { useEffect } from 'react'
 import { IS_FIREBASE } from './firebase'
+import { IS_LOCAL } from './runtime'
 import { pollJobOnce } from './generation-client'
 import type { GenerationJob } from './firestore-types'
 
@@ -30,7 +31,9 @@ export function useJobPolling(jobs: GenerationJob[], intervalMs = 4000): void {
   const key = activeIds.slice().sort().join(',')
 
   useEffect(() => {
-    if (!IS_FIREBASE || activeIds.length === 0) return
+    // In local mode the engine advances jobs itself and subscribeJobs polls the
+    // store, so there is nothing to nudge here.
+    if (IS_LOCAL || !IS_FIREBASE || activeIds.length === 0) return
     let stopped = false
 
     const poll = () => {

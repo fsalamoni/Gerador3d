@@ -17,6 +17,8 @@ import {
   deleteDoc,
 } from 'firebase/firestore'
 import { IS_FIREBASE, db } from './firebase'
+import { IS_LOCAL } from './runtime'
+import { localListJobs, localGetJob, localDeleteJob } from './local-api'
 import { getCurrentUserId } from './firestore-service'
 import type { GenerationJob } from './firestore-types'
 
@@ -50,6 +52,7 @@ export const JOBS_UPDATED_EVENT = 'gerador3d:jobs_updated'
 
 /** Create a new job document. */
 export async function createJob(job: GenerationJob, uid?: string): Promise<void> {
+  if (IS_LOCAL) return // the local engine owns job creation
   const resolved = uid ?? getCurrentUserId()
   if (!resolved) return
 
@@ -68,6 +71,7 @@ export async function updateJob(
   patch: Partial<GenerationJob>,
   uid?: string,
 ): Promise<void> {
+  if (IS_LOCAL) return // the local engine owns job updates
   const resolved = uid ?? getCurrentUserId()
   if (!resolved) return
 
@@ -83,6 +87,7 @@ export async function updateJob(
 
 /** Delete a job document. */
 export async function deleteJob(jobId: string, uid?: string): Promise<void> {
+  if (IS_LOCAL) return localDeleteJob(jobId)
   const resolved = uid ?? getCurrentUserId()
   if (!resolved) return
 
@@ -97,6 +102,7 @@ export async function deleteJob(jobId: string, uid?: string): Promise<void> {
 
 /** Fetch a single job. */
 export async function getJob(jobId: string, uid?: string): Promise<GenerationJob | null> {
+  if (IS_LOCAL) return localGetJob(jobId)
   const resolved = uid ?? getCurrentUserId()
   if (!resolved) return null
 
@@ -130,6 +136,19 @@ export function subscribeJobs(
   onChange: (jobs: GenerationJob[]) => void,
   uid?: string,
 ): () => void {
+  // Local desktop engine — poll the local store (no Firestore realtime).
+  if (IS_LOCAL) {
+    let stop = false
+    const tick = () => {
+      void localListJobs()
+        .then((jobs) => { if (!stop) onChange(jobs) })
+        .catch(() => {})
+    }
+    tick()
+    const timer = setInterval(tick, 2000)
+    return () => { stop = true; clearInterval(timer) }
+  }
+
   const resolved = uid ?? getCurrentUserId()
   if (!resolved) return () => {}
 
