@@ -13,10 +13,21 @@ Para texto→3D a estratégia é texto→imagem (diffusers) e depois imagem→3D
 """
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 _MODELS = {}  # cache de modelos carregados por backend
+
+
+def _ensure_local_repo_on_path(*names):
+    """Adiciona repositórios clonados localmente (ex.: TripoSR) ao sys.path,
+    para que `from tsr.system import TSR` funcione após o setup."""
+    here = Path(__file__).resolve().parent
+    for name in names:
+        cand = here / name
+        if cand.exists() and str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
 
 
 def cuda_available() -> bool:
@@ -72,6 +83,7 @@ def _triposr(task, prompt, image_path, out_path, progress):
     if progress:
         progress(20, "carregando TripoSR")
     if "triposr" not in _MODELS:
+        _ensure_local_repo_on_path("TripoSR", "tsr_repo")
         from tsr.system import TSR
         model = TSR.from_pretrained(
             os.environ.get("TRIPOSR_MODEL", "stabilityai/TripoSR"),
