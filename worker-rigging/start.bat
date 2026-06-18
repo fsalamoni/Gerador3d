@@ -1,29 +1,41 @@
 @echo off
 chcp 65001 >nul
 title Gerador3D - Worker de Rigging Local
-echo.
-echo [36m╔══════════════════════════════════════════════╗
-echo ║   GERADOR3D - WORKER DE RIGGING LOCAL      ║
-echo ║   Iniciando servidor + ngrok automaticamente ║
-echo ╚══════════════════════════════════════════════╝[0m
-echo.
 
 cd /d d:\Gerador3d\worker-rigging
 
-echo [33m[1/2] Iniciando Worker Python na porta 8000...[0m
-start "Gerador3D Worker" cmd /k "python main.py"
+echo.
+echo [36m╔══════════════════════════════════════════════╗
+echo ║   GERADOR3D - WORKER DE RIGGING LOCAL      ║
+echo ╚══════════════════════════════════════════════╝[0m
+echo.
 
-echo [33m[2/2] Iniciando ngrok na porta 8000...[0m
+echo [33mMatando processos antigos...[0m
+taskkill /F /IM python.exe /FI "WINDOWTITLE eq Gerador3D Worker" >nul 2>&1
+taskkill /F /IM ngrok.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+
+echo [33mIniciando Worker Python na porta 8000...[0m
+start "Gerador3D Worker" cmd /k "python d:\Gerador3d\worker-rigging\main.py"
+
+echo [33mAguardando Worker iniciar...[0m
+timeout /t 3 /nobreak >nul
+
+echo [33mIniciando ngrok...[0m
+start "Gerador3D Ngrok" cmd /k "ngrok http 8000"
+
+timeout /t 2 /nobreak >nul
 echo.
 echo [32m====================================[0m
 echo [32m  TUDO PRONTO!                       [0m
 echo [32m  Worker: http://localhost:8000      [0m
-echo [32m  Ngrok:  veja a URL no terminal     [0m
+echo [32m  Ngrok:  veja a URL no outro terminal[0m
 echo [32m====================================[0m
 echo.
-echo [93mCopie a URL do ngrok (Forwarding) e cole nas[0m
-echo [93mConfigurações da plataforma em Self-hosted.[0m
+echo [93mCopie a URL 'Forwarding' da janela do ngrok[0m
+echo [93me cole em: Configuracoes -> Self-hosted -> Base URL[0m
 echo.
-echo [90mFeche esta janela quando quiser parar tudo.[0m
+echo [90mFeche as janelas quando quiser parar.[0m
 echo.
-start "Gerador3D Ngrok" cmd /k "ngrok http 8000"
+pause
+
