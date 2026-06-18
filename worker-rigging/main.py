@@ -10,7 +10,7 @@ jobs = {}
 
 class RigRequest(BaseModel):
     downloadUrl: str
-    uploadUrl: str
+    uploadUrl: str = ""  # optional — if empty, worker just processes and returns success
 
 def process_rigging(task_id: str, req: RigRequest):
     jobs[task_id] = {"status": "in_progress", "progress": 10}
@@ -29,25 +29,25 @@ def process_rigging(task_id: str, req: RigRequest):
 
         # 2. Executar o Blender de forma invisível
         print(f"[{task_id}] Executando Blender Headless...")
+        blender_exe = os.environ.get("BLENDER_PATH", "blender")
         blender_cmd = [
-            "blender", "-b", "-P", "rig_script.py", "--",
+            blender_exe, "-b", "-P", "rig_script.py", "--",
             "--in", input_path, "--out", output_path
         ]
-        # Adicione o caminho do blender na sua variável de ambiente (PATH), 
-        # ou passe o caminho completo aqui (ex: "C:\\Program Files\\Blender Foundation\\Blender 4.0\\blender.exe")
         subprocess.run(blender_cmd, check=True, capture_output=True)
         
         jobs[task_id]["progress"] = 80
 
-        # 3. Fazer upload do resultado (.VRM) usando a URL assinada pelo Firebase
-        print(f"[{task_id}] Fazendo upload do resultado...")
-        with open(output_path, 'rb') as f:
-            up_req = requests.put(
-                req.uploadUrl, 
-                data=f, 
-                headers={"Content-Type": "application/octet-stream"}
-            )
-            up_req.raise_for_status()
+        # 3. Upload se tiver URL, senão apenas marca como sucesso
+        if req.uploadUrl:
+            print(f"[{task_id}] Fazendo upload do resultado...")
+            with open(output_path, 'rb') as f:
+                up_req = requests.put(
+                    req.uploadUrl, 
+                    data=f, 
+                    headers={"Content-Type": "application/octet-stream"}
+                )
+                up_req.raise_for_status()
         
         jobs[task_id]["progress"] = 100
         jobs[task_id]["status"] = "succeeded"
