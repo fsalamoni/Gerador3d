@@ -35,10 +35,19 @@ faz `PUT` do `.vrm` no `uploadUrl` (link assinado fornecido pela Cloud Function)
    ou em `worker-rigging/templates/`. Alternativamente, aponte com a variável de
    ambiente `RIG_TEMPLATE_PATH` ou o argumento `--template`.
 
-   > Onde conseguir um template: exporte uma cabeça ARKit-compatible (por
-   > exemplo de uma base VRoid/ReadyPlayerMe com perfect-sync, ou um rig ARKit
-   > livre) garantindo que os morph targets tenham os nomes ARKit
-   > (`jawOpen`, `eyeBlinkLeft`, `mouthSmileLeft`, ...).
+   **Não tem um template?** Gere um starter com um comando (usa o seu Blender):
+   ```bash
+   blender -b -P make_template.py -- --out template_face.glb
+   ```
+   Isso cria um `template_face.glb` com os 52 shape keys ARKit já nomeados e com
+   deformações plausíveis (mandíbula, piscar, sorriso, sobrancelhas...). É
+   suficiente para validar o pipeline de ponta a ponta. Para qualidade final,
+   substitua por um head ARKit profissional (mesmos nomes de morph target).
+
+   > Onde conseguir um template profissional: exporte uma cabeça
+   > ARKit-compatible (por exemplo de uma base VRoid/ReadyPlayerMe com
+   > perfect-sync, ou um rig ARKit livre) garantindo que os morph targets tenham
+   > os nomes ARKit (`jawOpen`, `eyeBlinkLeft`, `mouthSmileLeft`, ...).
 
    O endpoint `GET /api/health` informa se o template foi detectado.
 
