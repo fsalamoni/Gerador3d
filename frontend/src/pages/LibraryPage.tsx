@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { Download, Sparkles, Video, Bone, UploadCloud, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { subscribeJobs, deleteJob } from '../lib/jobs-store'
+import { useJobPolling } from '../lib/job-poller'
 import type { GenerationJob } from '../lib/firestore-types'
 import ModelViewer from '../components/ModelViewer'
 import { upload3DModel } from '../lib/upload-service'
@@ -26,6 +27,9 @@ export default function LibraryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => subscribeJobs(setJobs), [])
+
+  // Advance any in-progress job (generation or rigging) until it completes.
+  useJobPolling(jobs)
 
   const handleUploadClick = () => {
     fileInputRef.current?.click()

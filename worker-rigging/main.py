@@ -117,20 +117,35 @@ def process_rigging(task_id: str, req: RigRequest):
             blender_cmd += ["--template", template]
         _set(task_id, progress=40)
 
-        proc = subprocess.run(
+        # Streama o stdout do Blender em tempo real para refletir o progresso
+        # real (o rig_script emite linhas "PROGRESS: <pct> <msg>"). stderr é
+        # mesclado para capturarmos a linha "RIG_ERROR:" em caso de falha.
+        proc = subprocess.Popen(
             blender_cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             errors="replace",
+            bufsize=1,
         )
-        # Logs do Blender ajudam muito no diagnóstico.
-        if proc.stdout:
-            print(f"[{task_id}] Blender stdout:\n{proc.stdout[-4000:]}")
-        if proc.stderr:
-            print(f"[{task_id}] Blender stderr:\n{proc.stderr[-4000:]}")
+        tail = []  # últimas linhas para diagnóstico
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            tail.append(line)
+            if len(tail) > 200:
+                tail.pop(0)
+            print(f"[{task_id}] {line}")
+            if "PROGRESS:" in line:
+                try:
+                    pct = int(line.split("PROGRESS:", 1)[1].strip().split()[0])
+                    # Mapeia 0..100 do rig para a faixa 40..80 do worker.
+                    _set(task_id, progress=40 + int(max(0, min(100, pct)) * 0.4))
+                except Exception:
+                    pass
+        proc.wait()
 
         if proc.returncode != 0:
-            detail = _extract_error(proc.stderr) or _extract_error(proc.stdout)
+            detail = _extract_error("\n".join(tail))
             raise RuntimeError(detail or f"Blender saiu com código {proc.returncode}.")
 
         if not output_path.exists() or output_path.stat().st_size == 0:

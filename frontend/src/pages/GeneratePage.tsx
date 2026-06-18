@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { useCatalogModels } from '../lib/model-catalog'
 import { resolveTaskModel, startGeneration } from '../lib/generation-client'
 import { subscribeJobs } from '../lib/jobs-store'
+import { useJobPolling } from '../lib/job-poller'
 import type { GenerationJob, ModelOption } from '../lib/firestore-types'
 import type { TaskKey } from '../lib/tasks-3d'
 import ModelViewer from '../components/ModelViewer'
@@ -45,6 +46,9 @@ export default function GeneratePage() {
     })
     return unsub
   }, [activeJob?.id])
+
+  // Drive the server-side poll so the proxy actually advances the job.
+  useJobPolling(activeJob ? [activeJob] : [])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 

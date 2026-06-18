@@ -95,7 +95,15 @@ cd worker-rigging && python main.py
 1. ~~Script real de rigging facial no `rig_script.py`~~ ✅ implementado
    (Surface Deform / Deformation Transfer + export VRM). Requer o template
    facial `template_face.glb` e o VRM Add-on no Blender.
-2. Integração com provedores além do Meshy (Tripo, Rodin, Hunyuan)
+2. Integração com provedores além do Meshy: ✅ **Tripo** (texto→3D e imagem→3D)
+   implementado no proxy. Faltam Rodin e Hunyuan (APIs com assinatura própria).
 3. Interface de edição de VRM no Estúdio
-4. Testes automatizados (parcial: lógica do Worker coberta por testes locais)
+4. Testes automatizados (parcial: lógica do Worker + gerador de template cobertos)
 5. ~~Suporte a VRM para exportação final~~ ✅ pipeline do Worker exporta `.vrm`
+
+## Notas de arquitetura (importante)
+- O cliente **precisa** acionar `pollJob3d` periodicamente para a Cloud Function
+  avançar o job (provider/worker) e gravar no Firestore. Isso é feito pelo hook
+  `useJobPolling` (frontend/src/lib/job-poller.ts), usado em Generate e Library.
+- O Worker reporta progresso ao vivo: o `rig_script.py` emite linhas
+  `PROGRESS: <pct>` que o `main.py` lê via streaming do stdout do Blender.

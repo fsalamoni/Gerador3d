@@ -19,6 +19,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getStorage } from 'firebase-admin/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { meshyDispatch, meshyPoll, type TaskKey } from './meshy.js';
+import { tripoDispatch, tripoPoll } from './tripo.js';
 import { persistAsset } from './storage.js';
 import { bumpJobCreated, bumpJobTerminal } from './stats.js';
 
@@ -125,7 +126,8 @@ export const generate3d = onCall(async (request) => {
 
     void bumpJobCreated(providerId, capabilityFor(task))
 
-    if (providerId !== 'meshy' && providerId !== 'local' && providerId !== 'selfhost') {
+    const SUPPORTED = new Set(['meshy', 'tripo', 'local', 'selfhost'])
+    if (!SUPPORTED.has(providerId)) {
       await jobRef.update({
         status: 'failed',
         error: `Provider "${providerId}" is not yet implemented in the proxy.`,
@@ -215,33 +217,33 @@ export const generate3d = onCall(async (request) => {
       }
     }
 
-    // Pass API key check if it's a mock action like "local" provider or just rigging mock.
-    let apiKey = ''
-    let baseUrl = ''
-    if (providerId === 'meshy' && task !== 'rigging') {
-      const creds = await loadCreds(uid, providerId)
-      apiKey = creds.apiKey
-      baseUrl = creds.baseUrl
-      if (!apiKey) {
-        await jobRef.update({
-          status: 'failed',
-          error: 'Missing API key for this provider.',
-          updated_at: new Date().toISOString(),
-        })
-        void bumpJobTerminal('failed')
-        throw new HttpsError('failed-precondition', 'Missing API key for this provider.')
-      }
+    // Cloud provider dispatch (Meshy / Tripo). The only keyless path is the
+    // Meshy rigging mock; every real generation needs the user's BYOK key.
+    const { apiKey, baseUrl } = await loadCreds(uid, providerId)
+    const keyOptional = providerId === 'meshy' && task === 'rigging'
+    if (!keyOptional && !apiKey) {
+      await jobRef.update({
+        status: 'failed',
+        error: 'Missing API key for this provider.',
+        updated_at: new Date().toISOString(),
+      })
+      void bumpJobTerminal('failed')
+      throw new HttpsError('failed-precondition', 'Missing API key for this provider.')
     }
 
     try {
-      const dispatch = await meshyDispatch({
+      const dispatchArgs = {
         task,
         modelId,
         prompt: data.prompt,
         imageDataUrl: data.imageDataUrl,
         apiKey,
         baseUrl,
-      })
+      }
+      const dispatch =
+        providerId === 'tripo'
+          ? await tripoDispatch(dispatchArgs)
+          : await meshyDispatch(dispatchArgs)
       await jobRef.update({
         status: 'in_progress',
         progress: 1,
@@ -289,7 +291,7 @@ export const pollJob3d = onCall(async (request) => {
   const job = snap.data() as Record<string, any>
   if (TERMINAL.has(job.status)) return job
 
-  if (job.providerId !== 'meshy' && job.providerId !== 'selfhost' && job.providerId !== 'local') {
+  if (!['meshy', 'tripo', 'selfhost', 'local'].includes(job.providerId)) {
     return job
   }
 
@@ -344,14 +346,16 @@ export const pollJob3d = onCall(async (request) => {
   const taskKey = (job.params?.taskKey ?? 'text_to_3d') as TaskKey
 
   try {
-    const outcome = await meshyPoll({
+    const pollArgs = {
       task: taskKey,
       providerTaskId: job.providerTaskId,
       stage: job.params?.stage ?? (taskKey === 'text_to_3d' ? 'preview' : 'single'),
       apiKey,
       baseUrl,
       sourceUrl: job.params?.prompt,
-    })
+    }
+    const outcome =
+      job.providerId === 'tripo' ? await tripoPoll(pollArgs) : await meshyPoll(pollArgs)
 
     const patch: Record<string, any> = {
       status: outcome.status,

@@ -117,6 +117,11 @@ def log(msg):
     print(f"[rig] {msg}", flush=True)
 
 
+def progress(pct, msg=""):
+    """Emite progresso 0..100 que o Worker lê para atualizar o job ao vivo."""
+    print(f"PROGRESS: {int(pct)} {msg}", flush=True)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────────────────────────────────────
@@ -294,9 +299,12 @@ def transfer_blendshapes(user, template):
     n_user_verts = len(user.data.vertices)
     created = []
 
-    for kb in t_keys.key_blocks:
-        if kb.name.lower() == "basis":
-            continue
+    transfer_keys = [kb for kb in t_keys.key_blocks if kb.name.lower() != "basis"]
+    total = max(1, len(transfer_keys))
+
+    for idx, kb in enumerate(transfer_keys):
+        # Progresso da transferência ocupa a faixa 40..78.
+        progress(40 + int(38 * idx / total), f"transferindo {kb.name}")
         # Preserva o nome ARKit vindo do template (ex.: "jawOpen").
         target_name = kb.name
 
@@ -524,6 +532,7 @@ def main():
     log(f"Template: {template_path}")
 
     reset_scene()
+    progress(5, "cena preparada")
 
     # 1. Importa o modelo do usuário.
     user_objs = import_any(args.input_path)
@@ -531,6 +540,7 @@ def main():
     if user_mesh is None:
         raise RuntimeError("Nenhuma malha encontrada no GLB do usuário.")
     log(f"Malha do usuário: '{user_mesh.name}' ({len(user_mesh.data.vertices)} vértices).")
+    progress(15, "modelo importado")
 
     existing_armature = find_armature(user_objs)
 
@@ -544,14 +554,18 @@ def main():
         )
     n_keys = len(tmpl_mesh.data.shape_keys.key_blocks) - 1
     log(f"Template: '{tmpl_mesh.name}' com {n_keys} shape keys.")
+    progress(28, "template importado")
 
     # 3. Alinha o template ao usuário.
     align_template_to_user(tmpl_mesh, user_mesh)
+    progress(38, "template alinhado")
 
     # 4. Transfere os blendshapes (Deformation Transfer / Surface Deform bake).
     created_shapes = transfer_blendshapes(user_mesh, tmpl_mesh)
     if not created_shapes:
         raise RuntimeError("Nenhuma shape key foi transferida; abortando.")
+
+    progress(80, "blendshapes transferidos")
 
     # Limpa os objetos do template — não vão para o output.
     bpy.ops.object.select_all(action="DESELECT")
@@ -568,6 +582,7 @@ def main():
         except Exception as exc:  # noqa: BLE001
             log(f"  ! Falha ao criar armature: {exc}")
             armature = None
+    progress(86, "esqueleto pronto")
 
     # 6. Export VRM (com fallback para GLB).
     vrm_ok = ensure_vrm_addon()
@@ -575,8 +590,10 @@ def main():
         try:
             assign_vrm_humanoid(armature)
             setup_vrm1_expressions(armature, user_mesh, set(created_shapes))
+            progress(94, "exportando VRM")
             export_vrm(args.output_path)
             log("Exportado como VRM com sucesso.")
+            progress(100, "concluído")
             return
         except Exception as exc:  # noqa: BLE001
             log(f"  ! Export VRM falhou ({exc}); usando fallback GLB.")
@@ -586,8 +603,10 @@ def main():
 
     # Fallback: GLB com morph targets preservados (continua visualizável e
     # contém os blendshapes ARKit para consumidores compatíveis).
+    progress(94, "exportando GLB (fallback)")
     export_glb_fallback(args.output_path)
     log("Exportado como GLB (fallback) com os morph targets ARKit preservados.")
+    progress(100, "concluído")
 
 
 if __name__ == "__main__":
