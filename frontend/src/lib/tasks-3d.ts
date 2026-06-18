@@ -74,7 +74,7 @@ export const TASK_DEFS: TaskDef[] = [
     },
     icon: 'bone',
     requiredCapability: 'rigging',
-    defaultModel: 'meshy:meshy-rigging',
+    defaultModel: 'selfhost:local-rigging',
   },
   {
     key: 'animation',

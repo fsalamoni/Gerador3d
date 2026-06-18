@@ -270,7 +270,7 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
     },
     dialect: 'custom',
     baseUrl: '',
-    capabilities: ['image-to-3d'],
+    capabilities: ['image-to-3d', 'rigging'],
     selfHosted: true,
     staticModels: [
       {
@@ -286,6 +286,17 @@ export const PROVIDERS: Record<ProviderId, ProviderDefinition> = {
         tier: 'fast',
         capabilities: ['image-to-3d'],
         isFree: true,
+      },
+      {
+        id: 'local-rigging',
+        label: 'Local Rigging Worker',
+        tier: 'fast',
+        capabilities: ['rigging'],
+        isFree: true,
+        description: {
+          pt: 'Worker Python local que usa Blender para gerar o rigging facial automaticamente.',
+          en: 'Local Python worker that uses Blender to automatically generate facial rigging.',
+        },
       },
     ],
   },

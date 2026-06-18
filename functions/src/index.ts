@@ -93,7 +93,7 @@ export const generate3d = onCall(async (request) => {
 
     void bumpJobCreated(providerId, capabilityFor(task))
 
-    if (providerId !== 'meshy' && providerId !== 'local') {
+    if (providerId !== 'meshy' && providerId !== 'local' && providerId !== 'selfhost') {
       await jobRef.update({
         status: 'failed',
         error: `Provider "${providerId}" is not yet implemented in the proxy.`,
@@ -101,6 +101,69 @@ export const generate3d = onCall(async (request) => {
       })
       void bumpJobTerminal('failed')
       throw new HttpsError('unimplemented', `Provider "${providerId}" not implemented yet.`)
+    }
+
+    // Self-hosted / local worker dispatch (rigging or other custom tasks)
+    if (providerId === 'selfhost' || providerId === 'local') {
+      const creds = await loadCreds(uid, providerId)
+      const baseUrl = creds.baseUrl?.replace(/\/+$/, '') // remove trailing slashes
+      
+      if (!baseUrl) {
+        await jobRef.update({
+          status: 'failed',
+          error: 'No worker URL configured for the self-hosted provider.',
+          updated_at: new Date().toISOString(),
+        })
+        void bumpJobTerminal('failed')
+        throw new HttpsError('failed-precondition', 'Configure a worker URL for the self-hosted provider.')
+      }
+
+      // Dispatch to the local worker (FastAPI)
+      const workerEndpoint = `${baseUrl}/api/rig`
+      logger.info('Dispatching rigging to local worker:', workerEndpoint)
+      
+      const workerPayload = {
+        downloadUrl: data.prompt || '', // frontend passes the model download link as prompt
+      }
+
+      try {
+        const fetch = (await import('node-fetch')).default;
+        const workerResp = await fetch(workerEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(workerPayload),
+        })
+        
+        if (!workerResp.ok) {
+          throw new Error(`Worker returned ${workerResp.status}: ${await workerResp.text()}`);
+        }
+
+        const workerResult = await workerResp.json() as { taskId: string };
+        
+        await jobRef.update({
+          status: 'in_progress',
+          progress: 10,
+          providerTaskId: workerResult.taskId,
+          params: {
+            prompt: data.prompt ?? '',
+            hasImage: Boolean(data.imageDataUrl),
+            taskKey: task,
+            stage: 'worker_processing',
+          },
+          updated_at: new Date().toISOString(),
+        })
+        
+        return { jobId }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Worker dispatch failed.'
+        await jobRef.update({
+          status: 'failed',
+          error: `Worker unreachable. Is the local server running? (${message})`,
+          updated_at: new Date().toISOString(),
+        })
+        void bumpJobTerminal('failed')
+        throw new HttpsError('internal', message)
+      }
     }
 
     // Pass API key check if it's a mock action like "local" provider or just rigging mock.
@@ -177,8 +240,53 @@ export const pollJob3d = onCall(async (request) => {
   const job = snap.data() as Record<string, any>
   if (TERMINAL.has(job.status)) return job
 
-  if (job.providerId !== 'meshy') {
+  if (job.providerId !== 'meshy' && job.providerId !== 'selfhost' && job.providerId !== 'local') {
     return job
+  }
+
+  // Self-hosted / local worker polling
+  if (job.providerId === 'selfhost' || job.providerId === 'local') {
+    const creds = await loadCreds(uid, job.providerId)
+    const baseUrl = creds.baseUrl?.replace(/\/+$/, '')
+    
+    if (!baseUrl || !job.providerTaskId) {
+      return job
+    }
+
+    try {
+      const fetch = (await import('node-fetch')).default;
+      const statusResp = await fetch(`${baseUrl}/api/status/${job.providerTaskId}`)
+      if (!statusResp.ok) {
+        return job
+      }
+      
+      const workerStatus = await statusResp.json() as { status: string; progress: number }
+      
+      const patch: Record<string, any> = {
+        progress: workerStatus.progress || job.progress,
+        updated_at: new Date().toISOString(),
+      }
+
+      if (workerStatus.status === 'succeeded') {
+        patch.status = 'succeeded'
+        patch.progress = 100
+        // The worker uploaded the result to the storage URL we provided
+        // We need to construct the final URL based on the job's storage path
+        const storageBucket = process.env.GCLOUD_PROJECT ? `${process.env.GCLOUD_PROJECT}.firebasestorage.app` : 'antonov-82411.firebasestorage.app'
+        const vrmUrl = `https://firebasestorage.googleapis.com/v0/b/${storageBucket}/o/antonov3d%2Fusers%2F${uid}%2Fmodels%2F${jobId}%2Fmodel.vrm?alt=media`
+        patch.outputs = { vrmUrl }
+      } else if (workerStatus.status === 'failed') {
+        patch.status = 'failed'
+        patch.error = 'Worker processing failed'
+      }
+
+      await jobRef.update(patch)
+      if (TERMINAL.has(patch.status)) void bumpJobTerminal(patch.status)
+      return { ...job, ...patch }
+    } catch {
+      // Worker unreachable, keep current status
+      return job
+    }
   }
 
   const { apiKey, baseUrl } = await loadCreds(uid, job.providerId)
