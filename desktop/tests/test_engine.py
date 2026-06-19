@@ -105,5 +105,12 @@ with mock.patch.object(ls.genbackends, "generate", side_effect=gen_capture):
 check("generate passa mcResolution", seen.get("params", {}).get("mcResolution") == 512)
 check("generate usa backend escolhido", seen.get("backend") == "triposr")
 
+# regressão: log com caracteres não-ASCII (→, ç, ã) NÃO pode levantar exceção
+try:
+    ls._plog("Geração 3D instalada! Você já pode gerar texto/imagem → 3D.")
+    check("plog é seguro com unicode (→/acentos)", True)
+except Exception:
+    check("plog é seguro com unicode (→/acentos)", False)
+
 print("\nRESULT:", "ALL PASS" if all(OK) else "SOME FAILED", f"({sum(OK)}/{len(OK)})")
 sys.exit(0 if all(OK) else 1)

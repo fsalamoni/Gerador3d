@@ -14,12 +14,19 @@ O processamento real do rigging facial está em rig_script.py (Blender/bpy).
 """
 
 import os
+import sys
 import subprocess
 import uuid
 import requests
 from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
+
+for _s in (sys.stdout, sys.stderr):  # logs UTF-8 (evita cp1252 no Windows)
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 app = FastAPI(title="Gerador3D Local Rigging Worker")
 jobs = {}

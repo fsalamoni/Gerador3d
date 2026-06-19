@@ -18,11 +18,18 @@ pesos (open-source) rodam localmente.
 """
 
 import os
+import sys
 import uuid
 import base64
 import tempfile
 import traceback
 from pathlib import Path
+
+for _s in (sys.stdout, sys.stderr):  # logs UTF-8 (evita cp1252 no Windows)
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import requests
 from fastapi import FastAPI, BackgroundTasks, HTTPException

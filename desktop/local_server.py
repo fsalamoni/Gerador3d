@@ -34,6 +34,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Logs em UTF-8 sempre (no Windows o codec padrão cp1252 não encoda "→", "ç"...,
+# o que quebrava prints com UnicodeEncodeError). errors="replace" nunca levanta.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path(os.environ.get("GR3D_ENGINE_ROOT") or Path(__file__).resolve().parent.parent)
 RIG_DIR = ROOT / "worker-rigging"
 GEN_DIR = ROOT / "worker-3dgen"
@@ -236,6 +244,8 @@ def run_rig(store: Store, job, source_url: str):
 
         # Usa os scripts (VRM Add-on) provisionados, se houver.
         env = dict(os.environ)
+        env["PYTHONUTF8"] = "1"           # rig_script imprime PT acentuado
+        env["PYTHONIOENCODING"] = "utf-8"
         cfg = store.dir / "engine_config.json"
         if cfg.exists():
             try:
@@ -300,7 +310,10 @@ def _plog(line):
         PROVISION["log"].append(line)
         if len(PROVISION["log"]) > 400:
             PROVISION["log"] = PROVISION["log"][-400:]
-    print(f"[provision] {line}", flush=True)
+    try:
+        print(f"[provision] {line}", flush=True)
+    except Exception:
+        pass  # nunca deixa o log derrubar a instalação
 
 
 def _pset(**kw):
@@ -362,8 +375,12 @@ def provision_generation(data_dir: Path):
         req = tdir / "requirements.txt"
         if req.exists():
             lines = [ln.strip() for ln in req.read_text("utf-8").splitlines()]
+            # Remove torchmcubes (compila C++ — usamos PyMCubes) e gradio (app web
+            # pesado e desnecessário; só usamos a biblioteca `tsr`).
+            drop = ("torchmcubes", "gradio")
             keep = [ln for ln in lines
-                    if ln and not ln.startswith("#") and "torchmcubes" not in ln.lower()]
+                    if ln and not ln.startswith("#")
+                    and not any(d in ln.lower() for d in drop)]
             filtered = tdir / "requirements.gerador3d.txt"
             filtered.write_text("\n".join(keep), "utf-8")
             _plog("Instalando dependências do TripoSR (sem torchmcubes)...")

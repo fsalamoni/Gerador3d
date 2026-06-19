@@ -37,6 +37,14 @@ import sys
 import argparse
 import traceback
 
+# Logs em UTF-8 (no Windows o codec cp1252 não encoda acentos/"→" e quebraria
+# os prints com UnicodeEncodeError). errors="replace" nunca levanta.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import bpy
 from mathutils import Vector
 

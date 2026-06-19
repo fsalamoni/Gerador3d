@@ -137,7 +137,13 @@ function startEngine(port) {
     py = bootstrapPython(sysPy) || sysPy
   }
 
-  const env = { ...process.env, GR3D_PORT: String(port), GR3D_ENGINE_ROOT: ENGINE_DIR }
+  const env = {
+    ...process.env,
+    GR3D_PORT: String(port),
+    GR3D_ENGINE_ROOT: ENGINE_DIR,
+    PYTHONUTF8: '1',            // evita UnicodeEncodeError no Windows (cp1252)
+    PYTHONIOENCODING: 'utf-8',
+  }
   const blender = bundledBlender()
   if (blender) {
     env.BLENDER_PATH = blender
