@@ -569,11 +569,22 @@ def main():
     progress(38, "template alinhado")
 
     # 4. Transfere os blendshapes (Deformation Transfer / Surface Deform bake).
-    created_shapes = transfer_blendshapes(user_mesh, tmpl_mesh)
-    if not created_shapes:
-        raise RuntimeError("Nenhuma shape key foi transferida; abortando.")
+    #    Se falhar (ex.: malha não-humanoide, bind impossível), NÃO aborta:
+    #    exporta o modelo base mesmo assim (rastreável por pose de cabeça).
+    try:
+        created_shapes = transfer_blendshapes(user_mesh, tmpl_mesh)
+    except Exception as exc:  # noqa: BLE001
+        log(f"  ! Transferência de blendshapes falhou ({exc}); exportando modelo base.")
+        created_shapes = []
+        # Remove um eventual Surface Deform deixado pela meio do caminho.
+        mod = user_mesh.modifiers.get("GR3D_SurfaceDeform")
+        if mod:
+            try:
+                user_mesh.modifiers.remove(mod)
+            except Exception:
+                pass
 
-    progress(80, "blendshapes transferidos")
+    progress(80, "blendshapes transferidos" if created_shapes else "sem blendshapes (modelo base)")
 
     # Limpa os objetos do template — não vão para o output.
     bpy.ops.object.select_all(action="DESELECT")

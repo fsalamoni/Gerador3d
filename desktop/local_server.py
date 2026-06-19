@@ -180,12 +180,23 @@ def run_generate(store: Store, job):
             raise ValueError("image_to_3d requer uma imagem.")
         if task == "text_to_3d" and not prompt.strip():
             raise ValueError("text_to_3d requer um prompt.")
-        genbackends.generate(
-            backend_name=backend, task=task, prompt=prompt,
+        prog = lambda p, _m="": store.update(jid, progress=max(5, min(95, int(p))))
+        gen_kwargs = dict(
+            task=task, prompt=prompt,
             image_path=str(image_path) if have_img else "", out_path=str(out),
-            progress=lambda p, _m="": store.update(jid, progress=max(5, min(95, int(p)))),
-            params=gen_params,
+            progress=prog, params=gen_params,
         )
+        try:
+            genbackends.generate(backend_name=backend, **gen_kwargs)
+        except (ImportError, ModuleNotFoundError) as e:
+            # Backend escolhido não instalado (ex.: Hunyuan/TRELLIS) → usa TripoSR.
+            if backend != "triposr":
+                print(f"[engine] backend '{backend}' indisponível ({e}); usando TripoSR.", flush=True)
+                set_backend(store.dir, "triposr")
+                store.update(jid, progress=10)
+                genbackends.generate(backend_name="triposr", **gen_kwargs)
+            else:
+                raise
         if not out.exists() or out.stat().st_size == 0:
             raise RuntimeError("O backend não gerou o .glb.")
         store.update(jid, status="succeeded", progress=100,
@@ -270,11 +281,18 @@ def run_rig(store: Store, job, source_url: str):
                 except Exception:
                     pass
         proc.wait()
+        combined = "\n".join(tail)
+        # O Blender às vezes retorna 0 mesmo com erro no script; então checamos
+        # o RIG_ERROR no log independentemente do código de saída.
+        rig_err = rigmod._extract_error(combined)
+        if rig_err:
+            raise RuntimeError(rig_err)
         if proc.returncode != 0:
-            raise RuntimeError(rigmod._extract_error("\n".join(tail))
-                               or f"Blender saiu com código {proc.returncode}.")
+            raise RuntimeError(f"Blender saiu com código {proc.returncode}. "
+                               f"Log: ...{combined[-400:]}")
         if not out.exists() or out.stat().st_size == 0:
-            raise RuntimeError("Blender terminou mas não gerou o .vrm.")
+            raise RuntimeError("Blender terminou mas não gerou o arquivo. "
+                               f"Log: ...{combined[-400:]}")
         store.update(jid, status="succeeded", progress=100,
                      outputs={"vrmUrl": f"/files/{jid}/model.vrm"})
     except Exception as e:  # noqa: BLE001
