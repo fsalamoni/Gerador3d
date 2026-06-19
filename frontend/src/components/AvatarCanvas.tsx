@@ -119,6 +119,13 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
         (gltf) => {
           if (disposed) return
           glbRoot = gltf.scene
+          glbRoot.traverse((o) => {
+            const mesh = o as THREE.Mesh
+            if (mesh.isMesh) {
+              const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+              mats.forEach((m) => { if (m) (m as THREE.Material).side = THREE.DoubleSide })
+            }
+          })
           frameObject(glbRoot)
           scene.add(glbRoot)
           setHeadCam(1.4, 2.0)

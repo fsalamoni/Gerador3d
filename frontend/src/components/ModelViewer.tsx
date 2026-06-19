@@ -74,6 +74,15 @@ export default function ModelViewer({ url, className = '', autoRotate = true }: 
         url,
         (gltf) => {
           if (disposed) return
+          // Modelos gerados (marching cubes) podem ter faces com orientação
+          // invertida; renderizar double-sided evita o modelo "sumir".
+          gltf.scene.traverse((o) => {
+            const mesh = o as THREE.Mesh
+            if (mesh.isMesh) {
+              const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+              mats.forEach((m) => { if (m) (m as THREE.Material).side = THREE.DoubleSide })
+            }
+          })
           root.add(gltf.scene)
           frameObject(gltf.scene)
         },
