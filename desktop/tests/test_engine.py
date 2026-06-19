@@ -112,5 +112,36 @@ try:
 except Exception:
     check("plog é seguro com unicode (→/acentos)", False)
 
+# regressão: backend indisponível (ImportError) cai para TripoSR
+def gen_fallback(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
+    if backend_name == "hunyuan":
+        raise ModuleNotFoundError("No module named 'hy3dshape'")
+    Path(out_path).write_bytes(b"GLB" * 10)
+IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMCAQDJrPU4AAAAAElFTkSuQmCC"
+ls.set_backend(data, "hunyuan")
+with mock.patch.object(ls.genbackends, "generate", side_effect=gen_fallback):
+    j = ls.new_job("image_to_3d", prompt="x")
+    j["params"]["_imageDataUrl"] = IMG
+    j["params"]["_backend"] = "hunyuan"
+    store.put(j); ls.run_generate(store, j)
+check("backend indisponível cai p/ TripoSR", store.get(j["id"])["status"] == "succeeded")
+check("config volta p/ triposr", client.get("/api/local/config").json()["backend"] == "triposr")
+
+# regressão: rigging aceita GLB de fallback quando não há .vrm
+class GlbFallbackPopen:
+    def __init__(self, cmd, **k):
+        self.returncode = 0
+        out = cmd[cmd.index("--out") + 1]
+        Path(Path(out).with_suffix(".glb")).write_bytes(b"GLB" * 40)  # só .glb, sem .vrm
+        self.stdout = iter(["[rig] fallback\n", "RIG_OUTPUT: model.glb\n"])
+    def wait(self): return 0
+src3 = data / "src3.glb"; src3.write_bytes(b"X" * 30)
+with mock.patch.object(ls.subprocess, "Popen", lambda cmd, **k: GlbFallbackPopen(cmd, **k)), \
+     mock.patch.object(ls.rigmod, "find_blender", return_value="blender"), \
+     mock.patch.object(ls.rigmod, "find_template", return_value=""):
+    j = ls.new_job("rigging", prompt=str(src3)); store.put(j); ls.run_rig(store, j, str(src3))
+jj = store.get(j["id"])
+check("rig aceita GLB de fallback", jj["status"] == "succeeded" and jj["outputs"].get("glbUrl", "").endswith("model.glb"))
+
 print("\nRESULT:", "ALL PASS" if all(OK) else "SOME FAILED", f"({sum(OK)}/{len(OK)})")
 sys.exit(0 if all(OK) else 1)

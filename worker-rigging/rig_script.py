@@ -621,10 +621,14 @@ def main():
         log("  ! VRM addon indisponível ou sem armature; usando fallback GLB.")
 
     # Fallback: GLB com morph targets preservados (continua visualizável e
-    # contém os blendshapes ARKit para consumidores compatíveis).
+    # contém os blendshapes ARKit para consumidores compatíveis). Escrevemos
+    # num caminho .glb (o exportador glTF força a extensão .glb) e avisamos o
+    # Worker com RIG_OUTPUT para ele saber que a saída é GLB, não VRM.
+    glb_path = str(os.path.splitext(args.output_path)[0] + ".glb")
     progress(94, "exportando GLB (fallback)")
-    export_glb_fallback(args.output_path)
-    log("Exportado como GLB (fallback) com os morph targets ARKit preservados.")
+    export_glb_fallback(glb_path)
+    log(f"Exportado como GLB (fallback) com os morph targets ARKit preservados.")
+    print(f"RIG_OUTPUT: {os.path.basename(glb_path)}", flush=True)
     progress(100, "concluído")
 
 

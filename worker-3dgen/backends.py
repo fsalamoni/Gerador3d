@@ -15,9 +15,34 @@ Para texto→3D a estratégia é texto→imagem (diffusers) e depois imagem→3D
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 _MODELS = {}  # cache de modelos carregados por backend
+
+# Importação do torch serializada: a UI chama /diagnostics (checa CUDA) ao mesmo
+# tempo que a geração roda noutra thread; importar torch concorrentemente causa
+# "partially initialized module 'torch' ... circular import". O lock garante um
+# único import; em caso de falha, removemos o módulo parcial de sys.modules.
+_TORCH_LOCK = threading.Lock()
+_TORCH = None
+
+
+def get_torch():
+    global _TORCH
+    if _TORCH is not None:
+        return _TORCH
+    with _TORCH_LOCK:
+        if _TORCH is None:
+            try:
+                import torch
+                _TORCH = torch
+            except BaseException:
+                for m in list(sys.modules):
+                    if m == "torch" or m.startswith("torch."):
+                        sys.modules.pop(m, None)
+                raise
+    return _TORCH
 
 
 def _ensure_local_repo_on_path(*names):
@@ -32,8 +57,7 @@ def _ensure_local_repo_on_path(*names):
 
 def cuda_available() -> bool:
     try:
-        import torch  # noqa: WPS433
-        return bool(torch.cuda.is_available())
+        return bool(get_torch().cuda.is_available())
     except Exception:
         return False
 
@@ -51,7 +75,7 @@ def text_to_image(prompt: str, out_png: str, progress=None) -> str:
     if progress:
         progress(15, "texto→imagem")
     try:
-        import torch
+        torch = get_torch()
         from diffusers import AutoPipelineForText2Image
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
@@ -90,7 +114,7 @@ def _install_mcubes_shim():
     try:
         import types as _types
         import numpy as _np
-        import torch as _torch
+        _torch = get_torch()
         import mcubes as _mcubes  # PyMCubes (prebuilt wheel)
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
@@ -111,7 +135,7 @@ def _install_mcubes_shim():
 
 
 def _triposr(task, prompt, image_path, out_path, progress, params=None):
-    import torch
+    torch = get_torch()
     from PIL import Image
     params = params or {}
 

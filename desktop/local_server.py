@@ -290,11 +290,17 @@ def run_rig(store: Store, job, source_url: str):
         if proc.returncode != 0:
             raise RuntimeError(f"Blender saiu com código {proc.returncode}. "
                                f"Log: ...{combined[-400:]}")
-        if not out.exists() or out.stat().st_size == 0:
+
+        # Saída: VRM (ideal) OU GLB de fallback (quando o VRM addon falha).
+        out_glb = job_dir / "model.glb"
+        if out.exists() and out.stat().st_size > 0:
+            outputs = {"vrmUrl": f"/files/{jid}/model.vrm"}
+        elif out_glb.exists() and out_glb.stat().st_size > 0:
+            outputs = {"glbUrl": f"/files/{jid}/model.glb"}  # riggado, sem VRM
+        else:
             raise RuntimeError("Blender terminou mas não gerou o arquivo. "
                                f"Log: ...{combined[-400:]}")
-        store.update(jid, status="succeeded", progress=100,
-                     outputs={"vrmUrl": f"/files/{jid}/model.vrm"})
+        store.update(jid, status="succeeded", progress=100, outputs=outputs)
     except Exception as e:  # noqa: BLE001
         store.update(jid, status="failed", error=str(e)[:500])
     finally:
