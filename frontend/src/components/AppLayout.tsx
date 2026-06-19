@@ -28,7 +28,6 @@ const NAV_ITEMS = (IS_LOCAL
       { to: '/app/library', icon: Library, key: 'nav.library', end: false },
       { to: '/app/studio', icon: Video, key: 'nav.studio', end: false },
       { to: '/app/setup', icon: Wrench, key: 'nav.setup', end: false },
-      { to: '/app/settings', icon: Settings, key: 'nav.settings', end: false },
     ]
   : [
       { to: '/app', icon: LayoutDashboard, key: 'nav.dashboard', end: true },

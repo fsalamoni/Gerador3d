@@ -17,9 +17,9 @@ on:
   workflow_dispatch:               # ou rode manualmente em Actions → Run workflow
     inputs:
       version:
-        description: 'Tag/versão do release (ex.: desktop-v0.1.3)'
+        description: 'Tag/versão do release (ex.: desktop-v0.1.4)'
         required: true
-        default: 'desktop-v0.1.3'
+        default: 'desktop-v0.1.4'
 
 permissions:
   contents: write
