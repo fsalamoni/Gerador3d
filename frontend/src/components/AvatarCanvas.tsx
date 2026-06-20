@@ -156,6 +156,12 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       if (vrm) {
         if (frame) applyFaceToVrm(vrm, frame, 0.5)
         vrm.update(delta)
+        // Rede de segurança das feições: além das expressões VRM (que dependem
+        // de binds do addon e às vezes falham silenciosamente no rigging),
+        // dirige também os morph targets ARKit crus da malha (jawOpen,
+        // mouthSmileLeft, ...) DEPOIS do update — assim o rosto se mexe mesmo
+        // sem os binds. É no-op em VRMs sem esses morphs (só toca nomes ARKit).
+        if (frame) applyFaceToGlbMorphs(vrm.scene, frame, 0.5)
       } else if (glbRoot && frame) {
         // Pose da cabeça
         if (frame.matrix && frame.matrix.length >= 16) {

@@ -338,6 +338,15 @@ TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/ma
 HUNYUAN_ZIP = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
 CUDA_INDEX = os.environ.get("TORCH_CUDA_INDEX", "https://download.pytorch.org/whl/cu121")
 
+# O TripoSR exige transformers==4.35.0 (o checkpoint usa a nomenclatura ANTIGA do
+# DINOv2: query/key/value). Versões novas do transformers renomearam para
+# q_proj/k_proj/v_proj e o checkpoint não carrega mais ("Missing key(s) in
+# state_dict for TSR: ...attention.q_proj.weight"). Como o Hunyuan3D-2 lista
+# 'transformers' SEM versão, instalá-lo atualizava o transformers e quebrava o
+# TripoSR. Por isso fixamos a versão e impedimos o Hunyuan de alterá-la: assim o
+# TripoSR (piso garantido / fallback) SEMPRE carrega.
+TRANSFORMERS_PIN = os.environ.get("GR3D_TRANSFORMERS_PIN", "transformers==4.35.0")
+
 
 def _plog(line):
     line = str(line).rstrip()
@@ -385,7 +394,7 @@ def provision_generation(data_dir: Path):
 
         _plog("Instalando libs de geração (diffusers/transformers/accelerate)...")
         _run([py, "-m", "pip", "install", "--no-warn-script-location",
-              "diffusers", "transformers", "accelerate"])
+              "diffusers", TRANSFORMERS_PIN, "accelerate"])
         _pset(progress=60)
 
         tdir = GEN_DIR / "TripoSR"
@@ -445,8 +454,9 @@ def _ensure_torch(py):
         _run([py, "-m", "pip", "install", "--no-warn-script-location",
               "torch", "torchvision", "--index-url", CUDA_INDEX])
     if importlib.util.find_spec("diffusers") is None:
+        # transformers fixado p/ não quebrar o TripoSR (ver TRANSFORMERS_PIN).
         _run([py, "-m", "pip", "install", "--no-warn-script-location",
-              "diffusers", "transformers", "accelerate"])
+              "diffusers", TRANSFORMERS_PIN, "accelerate"])
 
 
 def provision_hunyuan(data_dir: Path):
@@ -483,10 +493,16 @@ def provision_hunyuan(data_dir: Path):
         _pset(progress=58)
 
         # Instala as deps do Hunyuan SEM torch/torchvision (já instalados com
-        # CUDA) e sem o app web (gradio/fastapi/uvicorn), desnecessário aqui.
+        # CUDA), sem o app web (gradio/fastapi/uvicorn), e — CRÍTICO — sem
+        # transformers/diffusers/accelerate: o Hunyuan os lista sem versão, e
+        # deixá-lo instalar atualizaria o transformers, quebrando o checkpoint
+        # do TripoSR (fallback). Eles já vêm da instalação base com a versão
+        # fixada (TRANSFORMERS_PIN). Se o Hunyuan precisar de uma versão mais
+        # nova, ele falha e a geração cai para o TripoSR — que continua íntegro.
         req = hdir / "requirements.txt"
         if req.exists():
-            drop = ("torch", "torchvision", "gradio", "fastapi", "uvicorn")
+            drop = ("torch", "torchvision", "gradio", "fastapi", "uvicorn",
+                    "transformers", "diffusers", "accelerate")
             keep = []
             for ln in req.read_text("utf-8").splitlines():
                 s = ln.strip()
@@ -500,6 +516,14 @@ def provision_hunyuan(data_dir: Path):
             filtered.write_text("\n".join(keep), "utf-8")
             _plog("Instalando dependências do Hunyuan3D (sem torch/app web)...")
             _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(filtered)])
+        _pset(progress=85)
+
+        # Repara/garante a versão do transformers exigida pelo TripoSR. Se um
+        # ambiente anterior foi atualizado por uma instalação antiga do Hunyuan
+        # (que quebrava o TripoSR com o erro 'q_proj'), isto o conserta — assim
+        # reinstalar QUALQUER um dos dois deixa a geração funcionando de novo.
+        _plog("Garantindo transformers compatível com o TripoSR (reparo)...")
+        _run([py, "-m", "pip", "install", "--no-warn-script-location", TRANSFORMERS_PIN])
         _pset(progress=92)
 
         # O backend importa `hy3dgen` via sys.path (não precisa de pip install -e).

@@ -112,8 +112,13 @@ export function applyFaceToGlbMorphs(
     const inf = (mesh as THREE.Mesh).morphTargetInfluences
     if (!dict || !inf) return
     for (const name in dict) {
+      // Só dirige morphs cujo nome é um blendshape que estamos rastreando
+      // (jawOpen, mouthSmileLeft, eyeBlinkLeft, ...). Morphs de outros nomes —
+      // ex.: VRMs "semânticos" com 'Fcl_MTH_A' ou morphs de roupa/cabelo — NÃO
+      // são tocados; do contrário os zeraríamos, brigando com o expressionManager.
+      if (!(name in bs)) continue
       const idx = dict[name]
-      const target = clamp01(bs[name] ?? 0)
+      const target = clamp01(bs[name])
       const cur = inf[idx] ?? 0
       inf[idx] = cur + (target - cur) * lerp
       if (target > 0) drove = true
