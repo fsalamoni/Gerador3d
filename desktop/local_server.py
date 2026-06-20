@@ -188,15 +188,25 @@ def run_generate(store: Store, job):
         )
         try:
             genbackends.generate(backend_name=backend, **gen_kwargs)
-        except (ImportError, ModuleNotFoundError) as e:
-            # Backend escolhido não instalado (ex.: Hunyuan/TRELLIS) → usa TripoSR.
-            if backend != "triposr":
-                print(f"[engine] backend '{backend}' indisponível ({e}); usando TripoSR.", flush=True)
-                set_backend(store.dir, "triposr")
-                store.update(jid, progress=10)
-                genbackends.generate(backend_name="triposr", **gen_kwargs)
-            else:
+        except Exception as e:  # noqa: BLE001
+            # Rede de segurança: QUALQUER falha de um backend que não seja o
+            # TripoSR (não instalado, módulo compilado que não carrega, ou GPU
+            # sem VRAM → "CUDA out of memory") cai para o TripoSR, que roda em
+            # praticamente qualquer GPU. Assim o usuário sempre recebe um modelo,
+            # mesmo quando o backend "premium" não roda na máquina dele.
+            if backend == "triposr":
                 raise
+            not_installed = isinstance(e, (ImportError, ModuleNotFoundError))
+            motivo = "não instalado" if not_installed else f"falhou ({type(e).__name__})"
+            print(f"[engine] backend '{backend}' {motivo}: {e}; usando TripoSR.", flush=True)
+            # Só troca a seleção em definitivo quando o backend realmente não
+            # está instalado. Falhas de runtime (ex.: falta de VRAM) podem ser
+            # transitórias — outro app pode ter liberado a GPU depois —, então
+            # preservamos a escolha do usuário e só usamos o TripoSR neste job.
+            if not_installed:
+                set_backend(store.dir, "triposr")
+            store.update(jid, progress=10)
+            genbackends.generate(backend_name="triposr", **gen_kwargs)
         if not out.exists() or out.stat().st_size == 0:
             raise RuntimeError("O backend não gerou o .glb.")
         store.update(jid, status="succeeded", progress=100,

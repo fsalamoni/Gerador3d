@@ -149,6 +149,22 @@ with mock.patch.object(ls.genbackends, "generate", side_effect=gen_fallback):
 check("backend indisponível cai p/ TripoSR", store.get(j["id"])["status"] == "succeeded")
 check("config volta p/ triposr", client.get("/api/local/config").json()["backend"] == "triposr")
 
+# regressão: falha de RUNTIME (ex.: GPU sem VRAM) também cai p/ TripoSR, mas
+# PRESERVA a escolha do usuário (o erro pode ser transitório).
+def gen_runtime_fail(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
+    if backend_name == "hunyuan-mini":
+        raise RuntimeError("CUDA out of memory")
+    Path(out_path).write_bytes(b"GLB" * 10)
+ls.set_backend(data, "hunyuan-mini")
+with mock.patch.object(ls.genbackends, "generate", side_effect=gen_runtime_fail):
+    j = ls.new_job("image_to_3d", prompt="y")
+    j["params"]["_imageDataUrl"] = IMG
+    j["params"]["_backend"] = "hunyuan-mini"
+    store.put(j); ls.run_generate(store, j)
+check("falha de runtime cai p/ TripoSR", store.get(j["id"])["status"] == "succeeded")
+check("falha de runtime preserva backend escolhido",
+      client.get("/api/local/config").json()["backend"] == "hunyuan-mini")
+
 # regressão: rigging aceita GLB de fallback quando não há .vrm
 class GlbFallbackPopen:
     def __init__(self, cmd, **k):
