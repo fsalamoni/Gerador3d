@@ -106,8 +106,10 @@ def expression_offset(name, co, H, C, S):
 
     # ── Mandíbula ──────────────────────────────────────────────────────────────
     if name == "jawOpen":
-        off.z -= 0.20 * hz * lower
-        off.y += 0.03 * hy * lower
+        # A mandíbula gira: pontos mais baixos/frontais caem mais (graduado pelo
+        # peso `lower`), com um leve recuo do queixo (−y) no extremo inferior.
+        off.z -= 0.26 * hz * lower
+        off.y += 0.04 * hy * lower * (1.0 - 0.5 * lower)
     elif name == "jawForward":
         off.y += 0.10 * hy * lower
     elif name == "jawLeft":
@@ -144,6 +146,9 @@ def expression_offset(name, co, H, C, S):
         w = gauss(co, ctr, sig_mouth)
         off.z += 0.10 * hz * w
         off.x += (0.05 * hx * w) * (1 if name.endswith("Left") else -1)
+        # Elevação da bochecha (sorriso Duchenne) — torna o sorriso mais natural.
+        cheek = C["cheekL"] if name.endswith("Left") else C["cheekR"]
+        off.z += 0.04 * hz * gauss(co, cheek, sig_cheek * 0.7)
     elif name in ("mouthFrownLeft", "mouthFrownRight"):
         ctr = C["mouthL"] if name.endswith("Left") else C["mouthR"]
         off.z -= 0.09 * hz * gauss(co, ctr, sig_mouth)
