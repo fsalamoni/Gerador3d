@@ -3,11 +3,16 @@
  *
  * Supports three model sources:
  *  - VRM  (.vrm)  → full expression + head-pose retargeting (perfect-sync style)
- *  - GLB  (.glb)  → head-pose only (generated meshes usually lack ARKit shapes)
+ *  - GLB  (.glb)  → head pose + ARKit morphs (native or procedurally generated)
  *  - none         → a procedural head that reacts to jaw/blink/pose (demo)
  *
  * Parent calls `applyFrame()` (via ref) on every tracking result; the render
  * loop smooths and applies the latest frame.
+ *
+ * Interactive mode (`interactive`) adds orbit controls + click-to-pick, used by
+ * the facial-rig flow: the user marks eyes/mouth/jaw on the model and we
+ * synthesize ARKit blendshapes on the fly ({@link buildProceduralMorphs}), so
+ * even creatures and template-less generated meshes get working expressions.
  */
 import {
   forwardRef,
@@ -17,12 +22,38 @@ import {
 } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm'
 import type { FaceFrame } from '../lib/face-tracking'
 import { applyFaceToProcedural, applyFaceToVrm, applyFaceToGlbMorphs } from '../lib/avatar-mapping'
+import {
+  buildProceduralMorphs,
+  loadLandmarks,
+  type FaceLandmarks,
+} from '../lib/procedural-face-rig'
+
+/** A surface point picked by clicking the model, in world + mesh-local space. */
+export interface PickHit {
+  world: [number, number, number]
+  local: [number, number, number]
+}
 
 export interface AvatarCanvasHandle {
   applyFrame: (frame: FaceFrame) => void
+  /** Arm one-shot pick mode; resolves on the next click on the model. */
+  pickPoint: () => Promise<PickHit | null>
+  cancelPick: () => void
+  addMarker: (world: [number, number, number], color?: number) => void
+  clearMarkers: () => void
+  /** Build ARKit morphs on the face mesh from landmarks. Throws if no mesh. */
+  buildFaceRig: (lm: FaceLandmarks) => string[]
+  /** Whether a riggable mesh (with vertices) is loaded. */
+  hasRiggableMesh: () => boolean
+  /** Whether the loaded mesh already exposes ARKit-named morphs. */
+  hasArkitMorphs: () => boolean
+  /** Preview a single morph (0..1) with the camera off. */
+  previewMorph: (name: string, value: number) => void
+  clearPreview: () => void
 }
 
 interface Props {
@@ -30,19 +61,103 @@ interface Props {
   /** "vrm" | "glb"; inferred from the URL extension when omitted. */
   modelKind?: 'vrm' | 'glb'
   transparent?: boolean
+  /** Enable orbit controls + click-to-pick (facial-rig flow). */
+  interactive?: boolean
   className?: string
 }
 
+const ARKIT_HINT = ['jawOpen', 'mouthSmileLeft', 'eyeBlinkLeft', 'mouthFunnel']
+
+function findLargestMesh(root: THREE.Object3D): THREE.Mesh | null {
+  let best: THREE.Mesh | null = null
+  let bestN = 0
+  root.traverse((o) => {
+    const m = o as THREE.Mesh
+    const pos = m.isMesh ? (m.geometry as THREE.BufferGeometry)?.getAttribute('position') : null
+    if (pos && pos.count > bestN) {
+      bestN = pos.count
+      best = m
+    }
+  })
+  return best
+}
+
+function meshHasArkitMorphs(root: THREE.Object3D): boolean {
+  let has = false
+  root.traverse((o) => {
+    const dict = (o as THREE.Mesh).morphTargetDictionary
+    if (dict && ARKIT_HINT.some((k) => k in dict)) has = true
+  })
+  return has
+}
+
 const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas(
-  { modelUrl, modelKind, transparent = false, className = '' },
+  { modelUrl, modelKind, transparent = false, interactive = false, className = '' },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<FaceFrame | null>(null)
 
+  // Shared three state (assigned in the effect, read by the handle methods).
+  const sceneRef = useRef<THREE.Scene | null>(null)
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
+  const rootRef = useRef<THREE.Object3D | null>(null) // vrm.scene or glbRoot
+  const faceMeshRef = useRef<THREE.Mesh | null>(null)
+  const markersRef = useRef<THREE.Group | null>(null)
+  const raycasterRef = useRef(new THREE.Raycaster())
+  const pickResolveRef = useRef<((hit: PickHit | null) => void) | null>(null)
+  const previewRef = useRef<{ name: string; value: number } | null>(null)
+
   useImperativeHandle(ref, () => ({
     applyFrame: (frame: FaceFrame) => {
       frameRef.current = frame
+    },
+    pickPoint: () =>
+      new Promise<PickHit | null>((resolve) => {
+        pickResolveRef.current?.(null) // cancel any pending pick
+        pickResolveRef.current = resolve
+      }),
+    cancelPick: () => {
+      pickResolveRef.current?.(null)
+      pickResolveRef.current = null
+    },
+    addMarker: (world, color = 0x34d399) => {
+      const group = markersRef.current
+      if (!group) return
+      const s = new THREE.Mesh(
+        new THREE.SphereGeometry(markerRadius(rootRef.current), 16, 16),
+        new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }),
+      )
+      s.renderOrder = 999
+      s.position.set(world[0], world[1], world[2])
+      group.add(s)
+    },
+    clearMarkers: () => {
+      const group = markersRef.current
+      if (!group) return
+      for (const c of [...group.children]) group.remove(c)
+    },
+    buildFaceRig: (lm) => {
+      const mesh = faceMeshRef.current
+      if (!mesh) throw new Error('Nenhuma malha de rosto carregada.')
+      const names = buildProceduralMorphs(mesh, lm)
+      return names
+    },
+    hasRiggableMesh: () => Boolean(faceMeshRef.current),
+    hasArkitMorphs: () => (rootRef.current ? meshHasArkitMorphs(rootRef.current) : false),
+    previewMorph: (name, value) => {
+      previewRef.current = { name, value }
+      const mesh = faceMeshRef.current
+      const dict = mesh?.morphTargetDictionary
+      if (mesh && dict && name in dict && mesh.morphTargetInfluences) {
+        mesh.morphTargetInfluences[dict[name]] = value
+      }
+    },
+    clearPreview: () => {
+      previewRef.current = null
+      const mesh = faceMeshRef.current
+      if (mesh?.morphTargetInfluences) mesh.morphTargetInfluences.fill(0)
     },
   }))
 
@@ -54,9 +169,11 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     const height = container.clientHeight
 
     const scene = new THREE.Scene()
+    sceneRef.current = scene
     if (!transparent) scene.background = new THREE.Color(0x0b1020)
 
     const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 100)
+    cameraRef.current = camera
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -64,12 +181,19 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     renderer.outputColorSpace = THREE.SRGBColorSpace
     if (transparent) renderer.setClearColor(0x000000, 0)
     container.appendChild(renderer.domElement)
+    rendererRef.current = renderer
 
     const hemi = new THREE.HemisphereLight(0xffffff, 0x444455, 1.2)
     scene.add(hemi)
     const key = new THREE.DirectionalLight(0xffffff, 1.3)
     key.position.set(1, 2, 2)
     scene.add(key)
+
+    const markers = new THREE.Group()
+    scene.add(markers)
+    markersRef.current = markers
+
+    let controls: OrbitControls | null = null
 
     // Refs to the active model state
     let vrm: VRM | null = null
@@ -87,6 +211,36 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     function setHeadCam(y: number, dist: number) {
       camera.position.set(0, y, dist)
       camera.lookAt(0, y, 0)
+      if (controls) {
+        controls.target.set(0, y, 0)
+        controls.update()
+      }
+    }
+
+    function enableControls(focusY: number) {
+      if (!interactive || controls) return
+      controls = new OrbitControls(camera, renderer.domElement)
+      controls.enableDamping = true
+      controls.dampingFactor = 0.08
+      controls.target.set(0, focusY, 0)
+      controls.update()
+    }
+
+    /** After a model loads: pick the face mesh and apply any saved rig. */
+    function onModelReady(root: THREE.Object3D) {
+      rootRef.current = root
+      const mesh = findLargestMesh(root)
+      faceMeshRef.current = mesh
+      if (mesh && modelUrl && !meshHasArkitMorphs(root)) {
+        const saved = loadLandmarks(modelUrl)
+        if (saved) {
+          try {
+            buildProceduralMorphs(mesh, saved)
+          } catch {
+            /* ignore — live tracking still drives head pose */
+          }
+        }
+      }
     }
 
     if (kind === 'none') {
@@ -97,6 +251,7 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       eyeR = built.eyeR
       scene.add(proceduralHead)
       setHeadCam(1.5, 1.7)
+      enableControls(1.5)
     } else if (kind === 'vrm') {
       const loader = new GLTFLoader()
       loader.register((parser) => new VRMLoaderPlugin(parser))
@@ -108,6 +263,8 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
           vrm.scene.rotation.y = Math.PI // face the camera
           scene.add(vrm.scene)
           setHeadCam(1.35, 1.1)
+          enableControls(1.35)
+          onModelReady(vrm.scene)
         },
         undefined,
         () => fallbackToProcedural(),
@@ -129,6 +286,8 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
           frameObject(glbRoot)
           scene.add(glbRoot)
           setHeadCam(1.4, 2.0)
+          enableControls(1.4)
+          onModelReady(glbRoot)
         },
         undefined,
         () => fallbackToProcedural(),
@@ -146,24 +305,59 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       setHeadCam(1.5, 1.7)
     }
 
+    // ── Click-to-pick (rig flow) ────────────────────────────────────────────
+    // We pick on pointer-UP only when there was no drag, so orbiting the model
+    // (a drag) never drops a stray marker.
+    let downX = 0
+    let downY = 0
+    function onPointerDown(ev: PointerEvent) {
+      downX = ev.clientX
+      downY = ev.clientY
+    }
+    function onPointerUp(ev: PointerEvent) {
+      const resolve = pickResolveRef.current
+      const root = rootRef.current
+      if (!resolve || !root) return
+      if (Math.hypot(ev.clientX - downX, ev.clientY - downY) > 6) return // was a drag
+      const rect = renderer.domElement.getBoundingClientRect()
+      const ndc = new THREE.Vector2(
+        ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+        -((ev.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycasterRef.current.setFromCamera(ndc, camera)
+      const hits = raycasterRef.current.intersectObject(root, true)
+      const hit = hits.find((h) => (h.object as THREE.Mesh).isMesh)
+      if (!hit) return
+      // Prefer the clicked mesh as the face mesh (handles multi-mesh models).
+      const hitMesh = hit.object as THREE.Mesh
+      if ((hitMesh.geometry as THREE.BufferGeometry)?.getAttribute('position')) {
+        faceMeshRef.current = hitMesh
+      }
+      const localV = hitMesh.worldToLocal(hit.point.clone())
+      pickResolveRef.current = null
+      resolve({
+        world: [hit.point.x, hit.point.y, hit.point.z],
+        local: [localV.x, localV.y, localV.z],
+      })
+    }
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('pointerup', onPointerUp)
+
     const clock = new THREE.Clock()
     let raf = 0
     function animate() {
       raf = requestAnimationFrame(animate)
       const delta = clock.getDelta()
       const frame = frameRef.current
+      controls?.update()
 
       if (vrm) {
         if (frame) applyFaceToVrm(vrm, frame, 0.5)
         vrm.update(delta)
-        // Rede de segurança das feições: além das expressões VRM (que dependem
-        // de binds do addon e às vezes falham silenciosamente no rigging),
-        // dirige também os morph targets ARKit crus da malha (jawOpen,
-        // mouthSmileLeft, ...) DEPOIS do update — assim o rosto se mexe mesmo
-        // sem os binds. É no-op em VRMs sem esses morphs (só toca nomes ARKit).
+        // Also drive raw ARKit morphs directly (works when VRM expression binds
+        // are missing, e.g. procedurally-rigged meshes). No-op without them.
         if (frame) applyFaceToGlbMorphs(vrm.scene, frame, 0.5)
       } else if (glbRoot && frame) {
-        // Pose da cabeça
         if (frame.matrix && frame.matrix.length >= 16) {
           const m = new THREE.Matrix4().fromArray(frame.matrix)
           const q = new THREE.Quaternion()
@@ -174,7 +368,6 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
           )
           glbRoot.quaternion.slerp(target, 0.4)
         }
-        // Feições faciais via morph targets ARKit do GLB (se houver)
         applyFaceToGlbMorphs(glbRoot, frame, 0.5)
       } else if (proceduralHead) {
         if (frame) applyFaceToProcedural(proceduralHead, jaw, eyeL, eyeR, frame, 0.4)
@@ -197,12 +390,20 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       disposed = true
       cancelAnimationFrame(raf)
       resizeObserver.disconnect()
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      renderer.domElement.removeEventListener('pointerup', onPointerUp)
+      controls?.dispose()
       renderer.dispose()
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement)
       }
+      sceneRef.current = null
+      rootRef.current = null
+      faceMeshRef.current = null
+      markersRef.current = null
+      pickResolveRef.current = null
     }
-  }, [modelUrl, modelKind, transparent])
+  }, [modelUrl, modelKind, transparent, interactive])
 
   return <div ref={containerRef} className={`h-full w-full ${className}`} />
 })
@@ -210,6 +411,12 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
 export default AvatarCanvas
 
 // ── Procedural head (demo fallback) ───────────────────────────────────────────
+
+function markerRadius(root: THREE.Object3D | null): number {
+  if (!root) return 0.02
+  const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3())
+  return Math.max(0.008, Math.max(size.x, size.y, size.z) * 0.02)
+}
 
 function buildProceduralHead(): {
   head: THREE.Group

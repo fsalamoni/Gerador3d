@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import AvatarCanvas, { type AvatarCanvasHandle } from '../components/AvatarCanvas'
+import FaceRigPanel from '../components/FaceRigPanel'
 import { useFaceTracking } from '../hooks/useFaceTracking'
 import { subscribeJobs } from '../lib/jobs-store'
 import type { GenerationJob } from '../lib/firestore-types'
@@ -42,8 +43,14 @@ export default function StudioPage() {
 
   const [source, setSource] = useState<Source>({ kind: 'none' })
   const [jobs, setJobs] = useState<GenerationJob[]>([])
+  const [rigMode, setRigMode] = useState(false)
 
   useEffect(() => subscribeJobs(setJobs), [])
+
+  // Leaving a model resets rig mode (the panel targets the current model).
+  useEffect(() => {
+    setRigMode(false)
+  }, [source])
 
   const generated = useMemo(
     () => jobs.filter((j) => j.status === 'succeeded' && (j.outputs?.glbUrl || j.outputs?.vrmUrl)),
@@ -78,7 +85,16 @@ export default function StudioPage() {
               ref={avatarRef}
               modelUrl={source.kind === 'none' ? undefined : source.url}
               modelKind={source.kind === 'none' ? undefined : source.kind}
+              interactive={rigMode}
             />
+
+            {rigMode && (
+              <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+                <span className="rounded-full bg-black/60 px-3 py-1 text-xs text-slate-200">
+                  Arraste para girar · clique para marcar os pontos
+                </span>
+              </div>
+            )}
 
             {/* Webcam preview */}
             <div className="absolute bottom-3 right-3 w-32 overflow-hidden rounded-lg border border-white/20 bg-black/60">
@@ -122,6 +138,15 @@ export default function StudioPage() {
 
         {/* Controls */}
         <div className="space-y-4">
+          {rigMode ? (
+            <FaceRigPanel
+              avatar={avatarRef}
+              modelUrl={source.kind === 'none' ? '' : source.url}
+              onClose={() => setRigMode(false)}
+              onBuilt={() => {}}
+            />
+          ) : (
+          <>
           {/* Camera */}
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
             {running ? (
@@ -245,6 +270,17 @@ export default function StudioPage() {
               )}
             </div>
 
+            {source.kind !== 'none' && (
+              <button
+                type="button"
+                onClick={() => { stop(); setRigMode(true) }}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-brand-500/40 bg-brand-600/15 px-4 py-2 text-sm font-semibold text-brand-100 transition hover:bg-brand-600/25"
+              >
+                <ScanFace className="h-4 w-4" />
+                Configurar expressões faciais
+              </button>
+            )}
+
             <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-300">
               <Info className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{t('studio.blendshapeNote')}</span>
@@ -265,6 +301,8 @@ export default function StudioPage() {
             </a>
             <p className="mt-2 text-[11px] text-slate-500">{t('studio.obsHint')}</p>
           </div>
+          </>
+          )}
         </div>
       </div>
     </div>

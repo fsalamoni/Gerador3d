@@ -338,15 +338,6 @@ TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/ma
 HUNYUAN_ZIP = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
 CUDA_INDEX = os.environ.get("TORCH_CUDA_INDEX", "https://download.pytorch.org/whl/cu121")
 
-# O TripoSR exige transformers==4.35.0 (o checkpoint usa a nomenclatura ANTIGA do
-# DINOv2: query/key/value). Versões novas do transformers renomearam para
-# q_proj/k_proj/v_proj e o checkpoint não carrega mais ("Missing key(s) in
-# state_dict for TSR: ...attention.q_proj.weight"). Como o Hunyuan3D-2 lista
-# 'transformers' SEM versão, instalá-lo atualizava o transformers e quebrava o
-# TripoSR. Por isso fixamos a versão e impedimos o Hunyuan de alterá-la: assim o
-# TripoSR (piso garantido / fallback) SEMPRE carrega.
-TRANSFORMERS_PIN = os.environ.get("GR3D_TRANSFORMERS_PIN", "transformers==4.35.0")
-
 
 def _plog(line):
     line = str(line).rstrip()
@@ -382,20 +373,65 @@ def _download(url, dest, label=""):
         shutil.copyfileobj(r, f)
 
 
+def _write_constraints(data_dir: Path) -> Path:
+    """Arquivo de constraints do pip que TRAVA o conjunto de versões compatível
+    com o TripoSR. O TripoSR exige transformers==4.35.0; este só funciona com
+    huggingface_hub 0.17.x e tokenizers 0.14.x (versões novas renomearam APIs e
+    quebram o import: 'q_proj', 'split_torch_state_dict_into_shards'). numpy<2
+    evita a quebra de ABI do numpy 2.x. Passar este arquivo em TODO `pip install
+    -c` impede qualquer instalação (TripoSR/Hunyuan/rembg) de subir essas libs —
+    a causa raiz dos erros de geração. (Conjunto resolvido e verificado por import.)"""
+    p = data_dir / "gr3d_constraints.txt"
+    p.write_text(
+        "transformers==4.35.0\n"
+        "huggingface_hub==0.17.3\n"
+        "tokenizers==0.14.1\n"
+        "numpy<2\n",
+        "utf-8",
+    )
+    return p
+
+
+def _selftest_imports(py, extra_paths=()):
+    """Import de fumaça no Python do app. Se o ambiente estiver inconsistente (o
+    caso dos bugs de dependência), falha AQUI — na instalação, com o erro real —
+    em vez de só na hora de gerar. Levanta em caso de falha."""
+    pre = "".join(f"sys.path.insert(0, r'''{p}'''); " for p in extra_paths)
+    code = (
+        "import sys; " + pre +
+        "from transformers.generation import utils as _u; "
+        "import mcubes, rembg, trimesh, PIL, numpy; "
+        "print('[selftest] transformers/mcubes/rembg/trimesh OK; numpy', numpy.__version__)"
+    )
+    _run([py, "-c", code])
+
+
 def provision_generation(data_dir: Path):
-    """Instala PyTorch (CUDA) + TripoSR + libs de geração no Python do app."""
+    """Instala PyTorch (CUDA) + TripoSR no Python do app, com um conjunto de
+    versões TRAVADO por constraints (evita o inferno de dependências) e um import
+    de fumaça ao final. Rodar de novo REPARA um ambiente já quebrado."""
     try:
         py = sys.executable
+        cons = _write_constraints(data_dir)
+
+        def pip(*args):
+            _run([py, "-m", "pip", "install", "--no-warn-script-location",
+                  "-c", str(cons), *args])
+
         _pset(progress=5)
         _plog("Instalando PyTorch (CUDA). Isto baixa ~2.5 GB, pode demorar...")
         _run([py, "-m", "pip", "install", "--no-warn-script-location",
               "torch", "torchvision", "--index-url", CUDA_INDEX])
-        _pset(progress=45)
+        _pset(progress=40)
 
-        _plog("Instalando libs de geração (diffusers/transformers/accelerate)...")
-        _run([py, "-m", "pip", "install", "--no-warn-script-location",
-              "diffusers", TRANSFORMERS_PIN, "accelerate"])
-        _pset(progress=60)
+        # Conjunto compatível com o TripoSR, TRAVADO e verificado por import
+        # (transformers 4.35.0 ↔ hf_hub 0.17.3 ↔ tokenizers 0.14.1 ↔ numpy 1.26).
+        # Forçá-lo aqui também REPARA um ambiente que tenha sido quebrado por
+        # instalações anteriores (hf_hub 1.x / numpy 2.x).
+        _plog("Fixando libs compatíveis com o TripoSR (transformers 4.35.0)...")
+        pip("transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
+            "numpy<2", "safetensors", "accelerate")
+        _pset(progress=55)
 
         tdir = GEN_DIR / "TripoSR"
         if not tdir.exists():
@@ -411,52 +447,70 @@ def provision_generation(data_dir: Path):
                 zpath.unlink()
             except Exception:
                 pass
-        _pset(progress=72)
+        _pset(progress=68)
 
-        # Instala as deps do TripoSR SEM o 'torchmcubes' (que exige compilar C++).
-        # No lugar dele usamos o PyMCubes (wheels prontas p/ Windows) — o backend
-        # registra um shim em runtime. Também garantimos rembg/onnxruntime.
+        # Deps do TripoSR SEM as libs que quebram o ambiente: torchmcubes (compila
+        # C++ — usamos PyMCubes), gradio (app web) e transformers/huggingface-hub/
+        # tokenizers (já travadas; a linha 'huggingface-hub' SEM versão do TripoSR
+        # puxava a série 1.x e quebrava tudo). O constraints garante o resto.
         req = tdir / "requirements.txt"
         if req.exists():
-            lines = [ln.strip() for ln in req.read_text("utf-8").splitlines()]
-            # Remove torchmcubes (compila C++ — usamos PyMCubes) e gradio (app web
-            # pesado e desnecessário; só usamos a biblioteca `tsr`).
-            drop = ("torchmcubes", "gradio")
-            keep = [ln for ln in lines
-                    if ln and not ln.startswith("#")
-                    and not any(d in ln.lower() for d in drop)]
+            drop = ("torchmcubes", "gradio", "transformers",
+                    "huggingface-hub", "huggingface_hub", "tokenizers")
+            keep = []
+            for ln in req.read_text("utf-8").splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                name = (s.split("==")[0].split(">=")[0].split("<")[0]
+                        .split("[")[0].strip().lower())
+                if name in drop or "torchmcubes" in s.lower():
+                    continue
+                keep.append(s)
             filtered = tdir / "requirements.gerador3d.txt"
             filtered.write_text("\n".join(keep), "utf-8")
-            _plog("Instalando dependências do TripoSR (sem torchmcubes)...")
-            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(filtered)])
+            _plog("Instalando dependências do TripoSR (travadas por constraints)...")
+            pip("-r", str(filtered))
         _plog("Instalando PyMCubes + rembg (marching cubes sem compilar)...")
-        _run([py, "-m", "pip", "install", "--no-warn-script-location",
-              "PyMCubes", "rembg", "onnxruntime"])
-        _pset(progress=95)
+        pip("PyMCubes", "rembg", "onnxruntime")
+        _pset(progress=85)
+
+        # diffusers (texto→imagem, p/ text_to_3d) é OPCIONAL e conflita com o set
+        # travado (exige hf_hub mais novo). Best-effort: se não der, o image_to_3d
+        # (caminho principal) continua 100% funcional.
+        try:
+            _plog("Tentando libs de texto→3D (opcional)...")
+            pip("diffusers==0.25.1")
+        except Exception as e:  # noqa: BLE001
+            _plog(f"(texto→3D opcional indisponível — image→3D não é afetado: {str(e)[:120]})")
+        _pset(progress=92)
+
+        _plog("Verificando a instalação (import de fumaça)...")
+        _selftest_imports(py, extra_paths=[str(tdir)])
 
         _CUDA_CACHE["checked"] = False  # re-checa CUDA/GPU depois de instalar o torch
         _CUDA_CACHE["gpu_checked"] = False
         _pset(progress=100, ok=True)
-        _plog("Geração 3D instalada com sucesso! Você já pode gerar texto/imagem → 3D.")
+        _plog("Geração 3D instalada e VERIFICADA! Você já pode gerar imagem → 3D.")
     except Exception as e:  # noqa: BLE001
         _pset(ok=False, error=str(e)[:500])
         _plog(f"ERRO: {e}")
-        _plog("Dica: se falhou no 'torchmcubes', instale o Microsoft C++ Build Tools "
-              "(Desktop development with C++) e tente de novo.")
+        _plog("Dica: clique em 'Instalar Geração 3D' de novo — ele repara as "
+              "versões. Se persistir, me envie o log acima.")
     finally:
         _pset(active=False, done=True)
 
 
-def _ensure_torch(py):
-    """Garante PyTorch (CUDA) + libs de geração base, se ainda não houver."""
+def _ensure_torch(py, cons):
+    """Garante PyTorch (CUDA) + o conjunto de libs TRAVADO compatível com o
+    TripoSR (transformers 4.35.0 e amigos), usando o constraints `cons`."""
     if importlib.util.find_spec("torch") is None:
         _plog("Instalando PyTorch (CUDA). Isto baixa ~2.5 GB, pode demorar...")
         _run([py, "-m", "pip", "install", "--no-warn-script-location",
               "torch", "torchvision", "--index-url", CUDA_INDEX])
-    if importlib.util.find_spec("diffusers") is None:
-        # transformers fixado p/ não quebrar o TripoSR (ver TRANSFORMERS_PIN).
-        _run([py, "-m", "pip", "install", "--no-warn-script-location",
-              "diffusers", TRANSFORMERS_PIN, "accelerate"])
+    _run([py, "-m", "pip", "install", "--no-warn-script-location", "-c", str(cons),
+          "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
+          "numpy<2", "safetensors", "accelerate"])
 
 
 def provision_hunyuan(data_dir: Path):
@@ -470,8 +524,9 @@ def provision_hunyuan(data_dir: Path):
     """
     try:
         py = sys.executable
+        cons = _write_constraints(data_dir)
         _pset(progress=5)
-        _ensure_torch(py)
+        _ensure_torch(py, cons)
         _pset(progress=40)
 
         hdir = GEN_DIR / "Hunyuan3D-2"
@@ -494,36 +549,39 @@ def provision_hunyuan(data_dir: Path):
 
         # Instala as deps do Hunyuan SEM torch/torchvision (já instalados com
         # CUDA), sem o app web (gradio/fastapi/uvicorn), e — CRÍTICO — sem
-        # transformers/diffusers/accelerate: o Hunyuan os lista sem versão, e
-        # deixá-lo instalar atualizaria o transformers, quebrando o checkpoint
-        # do TripoSR (fallback). Eles já vêm da instalação base com a versão
-        # fixada (TRANSFORMERS_PIN). Se o Hunyuan precisar de uma versão mais
-        # nova, ele falha e a geração cai para o TripoSR — que continua íntegro.
+        # transformers/diffusers/accelerate/huggingface_hub/tokenizers: o Hunyuan
+        # os lista sem versão, e deixá-lo instalar subiria o transformers/hf_hub,
+        # quebrando o TripoSR (fallback). O constraints (-c) é a trava de
+        # segurança final: mesmo que uma dep tente subir essas libs, é impedida.
         req = hdir / "requirements.txt"
         if req.exists():
             drop = ("torch", "torchvision", "gradio", "fastapi", "uvicorn",
-                    "transformers", "diffusers", "accelerate")
+                    "transformers", "diffusers", "accelerate",
+                    "huggingface-hub", "huggingface_hub", "tokenizers", "numpy")
             keep = []
             for ln in req.read_text("utf-8").splitlines():
                 s = ln.strip()
                 if not s or s.startswith("#"):
                     continue
-                name = s.split("==")[0].split(">=")[0].split("<")[0].strip().lower()
+                name = (s.split("==")[0].split(">=")[0].split("<")[0]
+                        .split("[")[0].strip().lower())
                 if name in drop:
                     continue
                 keep.append(s)
             filtered = hdir / "requirements.gerador3d.txt"
             filtered.write_text("\n".join(keep), "utf-8")
-            _plog("Instalando dependências do Hunyuan3D (sem torch/app web)...")
-            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(filtered)])
+            _plog("Instalando dependências do Hunyuan3D (travadas por constraints)...")
+            _run([py, "-m", "pip", "install", "--no-warn-script-location",
+                  "-c", str(cons), "-r", str(filtered)])
         _pset(progress=85)
 
-        # Repara/garante a versão do transformers exigida pelo TripoSR. Se um
-        # ambiente anterior foi atualizado por uma instalação antiga do Hunyuan
-        # (que quebrava o TripoSR com o erro 'q_proj'), isto o conserta — assim
+        # Reafirma o conjunto compatível com o TripoSR. Se um ambiente anterior
+        # foi quebrado por uma instalação antiga do Hunyuan, isto o conserta —
         # reinstalar QUALQUER um dos dois deixa a geração funcionando de novo.
-        _plog("Garantindo transformers compatível com o TripoSR (reparo)...")
-        _run([py, "-m", "pip", "install", "--no-warn-script-location", TRANSFORMERS_PIN])
+        _plog("Garantindo libs compatíveis com o TripoSR (reparo)...")
+        _run([py, "-m", "pip", "install", "--no-warn-script-location", "-c", str(cons),
+              "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
+              "numpy<2"])
         _pset(progress=92)
 
         # O backend importa `hy3dgen` via sys.path (não precisa de pip install -e).

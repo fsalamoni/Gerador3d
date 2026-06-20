@@ -193,7 +193,7 @@
     "openObs": "Abrir vista para OBS",
     "obsHint": "No OBS, adicione uma Fonte de Navegador apontando para a URL aberta. O fundo é transparente.",
     "permissionHint": "Permita o acesso à câmera quando o navegador solicitar.",
-    "blendshapeNote": "Modelos .glb gerados normalmente não têm blendshapes ARKit; nesse caso aplicamos apenas a rotação da cabeça. Use um VRM com blendshapes para expressões completas."
+    "blendshapeNote": "Modelo sem blendshapes? Clique em \"Configurar expressões faciais\" e marque olhos, boca e queixo — geramos boca, sorriso, piscar e abrir a boca para qualquer personagem, inclusive criaturas."
   },
   "analytics": {
     "title": "Análises de uso",
