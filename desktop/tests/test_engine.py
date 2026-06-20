@@ -61,6 +61,11 @@ check("rig fonte ausente -> failed", store.get(j["id"])["status"] == "failed")
 # diagnostics
 d = client.get("/api/local/diagnostics").json()
 check("diagnostics shape", "rigging" in d and "generation" in d and "ready" in d["generation"])
+g = d["generation"]
+check("diagnostics expõe GPU/VRAM/recomendação",
+      "vramGb" in g and "recommendedBackend" in g and isinstance(g.get("catalog"), dict)
+      and "hunyuan" in g)
+check("recomendação é um backend conhecido", g["recommendedBackend"] in ls.genbackends._BACKENDS)
 
 # provision generation (mock o runner pesado para nao instalar de verdade)
 import threading as _th
@@ -85,6 +90,23 @@ finally:
 # target invalido -> 400
 check("provision target invalido -> 400",
       client.post("/api/local/provision", json={"target": "xpto"}).status_code == 400)
+
+# provision hunyuan (mock o runner pesado) é um target válido
+def fake_hunyuan(data_dir):
+    ls._pset(progress=100, ok=True); ls._plog("mock hunyuan"); ls._pset(active=False, done=True)
+orig_h = ls.provision_hunyuan
+ls.provision_hunyuan = fake_hunyuan
+try:
+    r = client.post("/api/local/provision", json={"target": "hunyuan"})
+    check("provision hunyuan start 200", r.status_code == 200)
+    import time as _t2
+    for _ in range(20):
+        if client.get("/api/local/provision/status").json()["done"]:
+            break
+        _t2.sleep(0.05)
+    check("provision hunyuan finished ok", client.get("/api/local/provision/status").json()["ok"])
+finally:
+    ls.provision_hunyuan = orig_h
 
 # config get/set backend
 cfg = client.get("/api/local/config").json()

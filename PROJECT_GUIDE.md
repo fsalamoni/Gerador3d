@@ -124,6 +124,25 @@ cd worker-rigging && python main.py
 - Os branches de modo local no frontend ficam atrás de `IS_LOCAL`
   (`frontend/src/lib/runtime.ts`), então a versão cloud não é afetada.
 
+## Novidades v0.3.0 (rigging + geração)
+- **Studio — calibração + suavização (frontend):** `frontend/src/lib/face-smoothing.ts`
+  traz um filtro **One-Euro** adaptativo por canal + **calibração de rosto neutro**
+  (subtrai o repouso do usuário e reescala). Integrado no `useFaceTracking`, então
+  Studio e OBS recebem o sinal estável. Botão "Calibrar rosto neutro" no Studio.
+- **Rigging Blender — transferência mais suave:** `rig_script.py` usa KDTree por
+  **K-vizinhos ponderados por distância** (antes: vizinho único), removendo o
+  facetamento em malhas geradas por IA.
+- **Geração — auto-detecção de VRAM:** `worker-3dgen/backends.py` expõe
+  `gpu_info()`, `BACKEND_CATALOG` e `recommend_backend()`. O engine
+  (`/diagnostics`) reporta GPU, VRAM e o backend recomendado; a tela de
+  Configuração mostra isso e marca cada modelo (VRAM mínima, PBR, instalável).
+- **Backend Hunyuan3D-2mini (geometria de alta fidelidade):** registrado em
+  `_BACKENDS` (`hunyuan-mini`), usa `hy3dgen.shapegen` + subfolder
+  `hunyuan3d-dit-v2-mini`. Provisionado por dentro do app
+  (`provision_hunyuan` → target `hunyuan`): baixa o repo Hunyuan3D-2 e instala as
+  deps (sem torch/app web). Caminho **geometry-only** (a textura PBR exige módulos
+  compilados — opt-in). Fallback automático para TripoSR se faltar VRAM/deps.
+
 ## Notas de arquitetura (importante)
 - O cliente **precisa** acionar `pollJob3d` periodicamente para a Cloud Function
   avançar o job (provider/worker) e gravar no Firestore. Isso é feito pelo hook

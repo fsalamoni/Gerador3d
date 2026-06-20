@@ -62,7 +62,7 @@ export default function SetupPage() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [prov?.log])
 
-  async function install(target: 'generation' | 'blender') {
+  async function install(target: 'generation' | 'hunyuan' | 'blender') {
     setError(null)
     try {
       await localProvision(target)
@@ -189,6 +189,7 @@ export default function SetupPage() {
                   >
                     {label}
                     {info?.texture && <span className="text-[9px] text-fuchsia-300">PBR</span>}
+                    {info && info.installable === false && <span className="rounded bg-slate-500/20 px-1 text-[9px] text-slate-300">manual</span>}
                     {isRec && <span className="rounded bg-brand-500/20 px-1 text-[9px] text-brand-200">recomendado</span>}
                     {tooHeavy && <span className="rounded bg-amber-500/20 px-1 text-[9px] text-amber-300">{info!.minVramGb}GB+</span>}
                   </button>
@@ -215,8 +216,34 @@ export default function SetupPage() {
         </button>
         <p className="mt-2 text-xs text-slate-500">
           Baixa ~2,5 GB (PyTorch) + o modelo. Pode levar vários minutos.
-          {backend === 'hunyuan' && ' Hunyuan é avançado (mais VRAM; pode exigir setup manual — ver guia).'}
         </p>
+
+        {/* Upgrade de qualidade: Hunyuan3D-2mini (geometria PBR) */}
+        {gen?.torch && (
+          <div className="mt-4 rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/[0.04] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-semibold text-fuchsia-100">
+                  <Sparkles className="h-4 w-4" /> Upgrade: Hunyuan3D-2mini
+                  {vram >= 12 && <span className="rounded bg-brand-500/20 px-1.5 py-0.5 text-[10px] text-brand-200">recomendado p/ sua GPU</span>}
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Geometria de altíssima fidelidade (muito acima do TripoSR). Precisa de ~12 GB de VRAM.
+                  {vram > 0 && vram < 12 && ' Sua GPU pode não ter VRAM suficiente.'}
+                </p>
+              </div>
+              <Dot ok={!!gen?.hunyuan} />
+            </div>
+            <button
+              disabled={busy}
+              onClick={() => install('hunyuan')}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-fuchsia-500/40 bg-fuchsia-600/15 px-4 py-2 text-sm font-semibold text-fuchsia-100 transition hover:bg-fuchsia-600/25 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              {gen?.hunyuan ? 'Reinstalar Hunyuan3D-2mini' : 'Instalar Hunyuan3D-2mini'}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* PROGRESSO AO VIVO */}

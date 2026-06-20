@@ -85,6 +85,8 @@ export interface BackendInfo {
   label: string
   minVramGb: number
   texture: boolean
+  /** Whether the app can one-click install it (vs. manual/Linux setup). */
+  installable?: boolean
   note: string
 }
 
@@ -96,6 +98,8 @@ export interface LocalDiagnostics {
     triposr: boolean
     cuda: boolean
     ready: boolean
+    /** Hunyuan3D-2mini repo + deps installed. */
+    hunyuan?: boolean
     /** GPU name, e.g. "NVIDIA GeForce RTX 4080" (empty on CPU). */
     gpu?: string
     /** Total VRAM in GB (0 when unknown / CPU). */
@@ -123,7 +127,7 @@ export async function localDiagnostics(): Promise<LocalDiagnostics> {
   return asJson<LocalDiagnostics>(await fetch(`${LOCAL_API}/diagnostics`))
 }
 
-export async function localProvision(target: 'generation' | 'blender'): Promise<void> {
+export async function localProvision(target: 'generation' | 'hunyuan' | 'blender'): Promise<void> {
   const res = await fetch(`${LOCAL_API}/provision`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

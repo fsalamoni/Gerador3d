@@ -325,6 +325,7 @@ _PLOCK = threading.Lock()
 _CUDA_CACHE = {"checked": False, "value": None}
 
 TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/main.zip"
+HUNYUAN_ZIP = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
 CUDA_INDEX = os.environ.get("TORCH_CUDA_INDEX", "https://download.pytorch.org/whl/cu121")
 
 
@@ -427,6 +428,84 @@ def provision_generation(data_dir: Path):
         _pset(active=False, done=True)
 
 
+def _ensure_torch(py):
+    """Garante PyTorch (CUDA) + libs de geração base, se ainda não houver."""
+    if importlib.util.find_spec("torch") is None:
+        _plog("Instalando PyTorch (CUDA). Isto baixa ~2.5 GB, pode demorar...")
+        _run([py, "-m", "pip", "install", "--no-warn-script-location",
+              "torch", "torchvision", "--index-url", CUDA_INDEX])
+    if importlib.util.find_spec("diffusers") is None:
+        _run([py, "-m", "pip", "install", "--no-warn-script-location",
+              "diffusers", "transformers", "accelerate"])
+
+
+def provision_hunyuan(data_dir: Path):
+    """Instala o Hunyuan3D-2mini (geometria de alta fidelidade) no Python do app.
+
+    Caminho 'geometry-only' — NÃO compila os módulos de textura
+    (custom_rasterizer/differentiable_renderer), que exigem toolchain C++/CUDA e
+    são frágeis no Windows. A geometria do mini já é um salto grande sobre o
+    TripoSR; a textura PBR é aplicada em runtime só se os módulos existirem.
+    O modelo (~2-3 GB) é baixado na 1ª geração.
+    """
+    try:
+        py = sys.executable
+        _pset(progress=5)
+        _ensure_torch(py)
+        _pset(progress=40)
+
+        hdir = GEN_DIR / "Hunyuan3D-2"
+        if not (hdir / "hy3dgen").exists():
+            _plog("Baixando o repositório Hunyuan3D-2 (código do pipeline)...")
+            zpath = data_dir / "hunyuan3d2.zip"
+            _download(HUNYUAN_ZIP, zpath, "Hunyuan3D-2")
+            with zipfile.ZipFile(zpath) as z:
+                z.extractall(GEN_DIR)
+            extracted = GEN_DIR / "Hunyuan3D-2-main"
+            if extracted.exists():
+                if hdir.exists():
+                    shutil.rmtree(hdir, ignore_errors=True)
+                extracted.rename(hdir)
+            try:
+                zpath.unlink()
+            except Exception:
+                pass
+        _pset(progress=58)
+
+        # Instala as deps do Hunyuan SEM torch/torchvision (já instalados com
+        # CUDA) e sem o app web (gradio/fastapi/uvicorn), desnecessário aqui.
+        req = hdir / "requirements.txt"
+        if req.exists():
+            drop = ("torch", "torchvision", "gradio", "fastapi", "uvicorn")
+            keep = []
+            for ln in req.read_text("utf-8").splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                name = s.split("==")[0].split(">=")[0].split("<")[0].strip().lower()
+                if name in drop:
+                    continue
+                keep.append(s)
+            filtered = hdir / "requirements.gerador3d.txt"
+            filtered.write_text("\n".join(keep), "utf-8")
+            _plog("Instalando dependências do Hunyuan3D (sem torch/app web)...")
+            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-r", str(filtered)])
+        _pset(progress=92)
+
+        # O backend importa `hy3dgen` via sys.path (não precisa de pip install -e).
+        set_backend(data_dir, "hunyuan-mini")
+        _pset(progress=100, ok=True)
+        _plog("Hunyuan3D-2mini instalado! Selecionado como modelo de geração. "
+              "A textura PBR exige módulos extras (avançado) — a geometria já "
+              "funciona. O modelo é baixado na 1ª geração.")
+    except Exception as e:  # noqa: BLE001
+        _pset(ok=False, error=str(e)[:500])
+        _plog(f"ERRO: {e}")
+        _plog("Dica: se faltou VRAM, volte ao TripoSR na tela de Configuração.")
+    finally:
+        _pset(active=False, done=True)
+
+
 def provision_blender(data_dir: Path):
     """Baixa o Blender portátil + VRM Add-on + template (fallback; o instalador
     completo já traz o Blender embutido)."""
@@ -525,6 +604,8 @@ def diagnostics(data_dir: Path):
     torch_ok = importlib.util.find_spec("torch") is not None
     diffusers_ok = importlib.util.find_spec("diffusers") is not None
     triposr_ok = (GEN_DIR / "TripoSR").exists() or importlib.util.find_spec("tsr") is not None
+    hunyuan_ok = ((GEN_DIR / "Hunyuan3D-2" / "hy3dgen").exists()
+                  or importlib.util.find_spec("hy3dgen") is not None)
     gpu = gpu_info_cached() if torch_ok else {"name": "", "vramGb": 0.0, "cuda": False}
     recommended = genbackends.recommend_backend(gpu.get("vramGb", 0.0))
     return {
@@ -538,6 +619,7 @@ def diagnostics(data_dir: Path):
             "torch": torch_ok,
             "diffusers": diffusers_ok,
             "triposr": triposr_ok,
+            "hunyuan": hunyuan_ok,
             "cuda": gpu.get("cuda", False),
             "gpu": gpu.get("name", ""),
             "vramGb": gpu.get("vramGb", 0.0),
@@ -623,9 +705,10 @@ def create_app(data_dir: Path) -> FastAPI:
         if PROVISION["active"]:
             raise HTTPException(409, "Já existe uma instalação em andamento.")
         target = body.target
-        fn = {"generation": provision_generation, "blender": provision_blender}.get(target)
+        fn = {"generation": provision_generation, "blender": provision_blender,
+              "hunyuan": provision_hunyuan}.get(target)
         if not fn:
-            raise HTTPException(400, "target inválido (use 'generation' ou 'blender').")
+            raise HTTPException(400, "target inválido (use 'generation', 'hunyuan' ou 'blender').")
         with _PLOCK:
             PROVISION.update({"active": True, "target": target, "progress": 0,
                               "done": False, "ok": False, "error": None, "log": []})
