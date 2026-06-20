@@ -93,6 +93,48 @@ function splitRotation(q: THREE.Quaternion, factor: number): THREE.Quaternion {
 }
 
 /**
+ * Drive a GLB's ARKit-named morph targets directly from the tracking frame.
+ *
+ * Generated/rigged GLBs carry morph targets named exactly like the ARKit
+ * blendshapes MediaPipe outputs (jawOpen, eyeBlinkLeft, mouthSmileLeft, …), so
+ * we can map them 1:1 without VRM. No-op for meshes without morph targets.
+ */
+export function applyFaceToGlbMorphs(
+  root: THREE.Object3D,
+  frame: FaceFrame,
+  lerp = 0.5,
+): boolean {
+  const bs = frame.blendshapes
+  let drove = false
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    const dict = (mesh as THREE.Mesh).morphTargetDictionary
+    const inf = (mesh as THREE.Mesh).morphTargetInfluences
+    if (!dict || !inf) return
+    for (const name in dict) {
+      const idx = dict[name]
+      const target = clamp01(bs[name] ?? 0)
+      const cur = inf[idx] ?? 0
+      inf[idx] = cur + (target - cur) * lerp
+      if (target > 0) drove = true
+    }
+  })
+  return drove
+}
+
+/** Whether a GLB scene has any morph targets (so we can drive expressions). */
+export function glbHasMorphTargets(root: THREE.Object3D): boolean {
+  let has = false
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length > 0) {
+      has = true
+    }
+  })
+  return has
+}
+
+/**
  * Apply a tracking frame to a procedural head group (the demo fallback used
  * when no VRM is loaded). Drives jaw, eye blinks and head rotation directly.
  */

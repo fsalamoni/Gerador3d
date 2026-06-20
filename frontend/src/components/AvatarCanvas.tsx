@@ -19,7 +19,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm'
 import type { FaceFrame } from '../lib/face-tracking'
-import { applyFaceToProcedural, applyFaceToVrm } from '../lib/avatar-mapping'
+import { applyFaceToProcedural, applyFaceToVrm, applyFaceToGlbMorphs } from '../lib/avatar-mapping'
 
 export interface AvatarCanvasHandle {
   applyFrame: (frame: FaceFrame) => void
@@ -156,15 +156,20 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       if (vrm) {
         if (frame) applyFaceToVrm(vrm, frame, 0.5)
         vrm.update(delta)
-      } else if (glbRoot && frame?.matrix && frame.matrix.length >= 16) {
-        const m = new THREE.Matrix4().fromArray(frame.matrix)
-        const q = new THREE.Quaternion()
-        m.decompose(new THREE.Vector3(), q, new THREE.Vector3())
-        const e = new THREE.Euler().setFromQuaternion(q, 'YXZ')
-        const target = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(e.x * 0.4, -e.y * 0.4, -e.z * 0.4, 'YXZ'),
-        )
-        glbRoot.quaternion.slerp(target, 0.4)
+      } else if (glbRoot && frame) {
+        // Pose da cabeça
+        if (frame.matrix && frame.matrix.length >= 16) {
+          const m = new THREE.Matrix4().fromArray(frame.matrix)
+          const q = new THREE.Quaternion()
+          m.decompose(new THREE.Vector3(), q, new THREE.Vector3())
+          const e = new THREE.Euler().setFromQuaternion(q, 'YXZ')
+          const target = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(e.x * 0.4, -e.y * 0.4, -e.z * 0.4, 'YXZ'),
+          )
+          glbRoot.quaternion.slerp(target, 0.4)
+        }
+        // Feições faciais via morph targets ARKit do GLB (se houver)
+        applyFaceToGlbMorphs(glbRoot, frame, 0.5)
       } else if (proceduralHead) {
         if (frame) applyFaceToProcedural(proceduralHead, jaw, eyeL, eyeR, frame, 0.4)
       }

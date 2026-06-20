@@ -179,12 +179,22 @@ def _triposr(task, prompt, image_path, out_path, progress, params=None):
     # Remoção de fundo (melhora muito o resultado).
     if remove_bg:
         try:
+            import numpy as np
             import rembg
             from tsr.utils import remove_background, resize_foreground
             image = remove_background(image, rembg.new_session())
             image = resize_foreground(image, fg_ratio)
+            # O TripoSR espera 3 canais (RGB). Após a remoção de fundo a imagem
+            # fica RGBA — compomos sobre cinza (como o run.py oficial) para não
+            # dar "tensor a (4) must match tensor b (3)".
+            arr = np.array(image).astype(np.float32) / 255.0
+            if arr.ndim == 3 and arr.shape[-1] == 4:
+                arr = arr[:, :, :3] * arr[:, :, 3:4] + (1.0 - arr[:, :, 3:4]) * 0.5
+                image = Image.fromarray((arr * 255.0).astype("uint8"))
+            else:
+                image = image.convert("RGB")
         except Exception:
-            pass  # segue sem remoção de fundo
+            image = Image.open(image_path).convert("RGB")  # garante 3 canais
 
     if progress:
         progress(60, f"reconstruindo 3D (res {resolution})")
