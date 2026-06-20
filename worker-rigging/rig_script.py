@@ -278,9 +278,61 @@ def ensure_basis(mesh_obj):
         mesh_obj.shape_key_add(name="Basis", from_mix=False)
 
 
+def transfer_blendshapes_kdtree(user, template):
+    """Transferência robusta por vizinho-mais-próximo (KDTree).
+
+    Funciona mesmo quando o Surface Deform NÃO consegue fazer o bind — o caso
+    comum em malhas geradas por IA (TripoSR/etc.), que têm topologia arbitrária
+    e não são "envolvidas" por um único esferoide. Para cada vértice do usuário
+    achamos o vértice de Basis do template mais próximo (em coordenadas de mundo)
+    e aplicamos o MESMO deslocamento (delta) que aquele vértice sofre em cada
+    shape key. Assim SEMPRE geramos os morph targets ARKit — o que faz as feições
+    faciais aparecerem no estúdio. Devolve a lista de shape keys criadas."""
+    from mathutils.kdtree import KDTree
+
+    t_keys = template.data.shape_keys
+    basis_kb = t_keys.key_blocks[0]
+    t_mw = template.matrix_world
+    u_mw = user.matrix_world
+    u_mw_inv3 = u_mw.inverted().to_3x3()  # mundo→local (só rotação/escala) p/ deltas
+
+    # KDTree dos vértices de Basis do template (em mundo) + suas posições.
+    n_t = len(basis_kb.data)
+    tb_world = [t_mw @ basis_kb.data[i].co for i in range(n_t)]
+    kd = KDTree(n_t)
+    for i, wco in enumerate(tb_world):
+        kd.insert(wco, i)
+    kd.balance()
+
+    ensure_basis(user)
+    u_basis = user.data.shape_keys.key_blocks[0]
+    n_user = len(user.data.vertices)
+
+    # Vizinho do template para cada vértice do usuário (calculado uma única vez).
+    nearest = [kd.find(u_mw @ v.co)[1] for v in user.data.vertices]
+
+    transfer_keys = [kb for kb in t_keys.key_blocks if kb.name.lower() != "basis"]
+    total = max(1, len(transfer_keys))
+    created = []
+    for ki, kb in enumerate(transfer_keys):
+        progress(40 + int(38 * ki / total), f"transferindo {kb.name}")
+        # Delta local (no espaço do usuário) por vértice do template, p/ esta key.
+        deltas = [u_mw_inv3 @ ((t_mw @ kb.data[i].co) - tb_world[i]) for i in range(n_t)]
+        new_key = user.shape_key_add(name=kb.name, from_mix=False)
+        for j in range(n_user):
+            new_key.data[j].co = u_basis.data[j].co + deltas[nearest[j]]
+        new_key.value = 0.0
+        created.append(kb.name)
+    log(f"Transferidas {len(created)} shape keys via KDTree (vizinho mais próximo).")
+    return created
+
+
 def transfer_blendshapes(user, template):
     """Transfere as shape keys do template para a malha do usuário via Surface
-    Deform bake. Devolve a lista de nomes de shape keys criadas no usuário."""
+    Deform bake. Devolve a lista de nomes de shape keys criadas no usuário.
+
+    Se o Surface Deform não conseguir fazer o bind (ou não produzir nenhuma
+    shape key), cai para a transferência por KDTree, que sempre funciona."""
     # Seleciona apenas o usuário e adiciona o modificador Surface Deform.
     bpy.ops.object.select_all(action="DESELECT")
     user.select_set(True)
@@ -298,10 +350,9 @@ def transfer_blendshapes(user, template):
     bpy.ops.object.surfacedeform_bind(modifier=mod.name)
     if not mod.is_bound:
         user.modifiers.remove(mod)
-        raise RuntimeError(
-            "Surface Deform não conseguiu fazer o bind. O template está muito "
-            "distante/desalinhado em relação à malha do usuário."
-        )
+        log("  ! Surface Deform não fez bind (topologia/escala muito diferentes); "
+            "usando transferência por vizinho mais próximo (KDTree).")
+        return transfer_blendshapes_kdtree(user, template)
 
     ensure_basis(user)
     n_user_verts = len(user.data.vertices)
@@ -346,6 +397,9 @@ def transfer_blendshapes(user, template):
 
     # Remove o modificador — as shape keys já estão "assadas" na malha.
     user.modifiers.remove(mod)
+    if not created:
+        log("  ! Surface Deform não produziu shape keys; tentando KDTree.")
+        return transfer_blendshapes_kdtree(user, template)
     log(f"Transferidas {len(created)} shape keys para a malha do usuário.")
     return created
 
