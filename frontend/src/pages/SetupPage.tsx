@@ -19,9 +19,10 @@ import {
 } from '../lib/local-api'
 
 const BACKEND_LABELS: Record<string, string> = {
-  triposr: 'TripoSR (rápido · recomendado)',
-  hunyuan: 'Hunyuan3D (texturas · avançado)',
-  trellis: 'TRELLIS (qualidade · Linux/WSL)',
+  triposr: 'TripoSR',
+  'hunyuan-mini': 'Hunyuan3D-2mini',
+  hunyuan: 'Hunyuan3D-2.1',
+  trellis: 'TRELLIS',
 }
 
 function Dot({ ok }: { ok: boolean }) {
@@ -82,6 +83,12 @@ export default function SetupPage() {
   const busy = Boolean(prov?.active)
   const rig = diag?.rigging
   const gen = diag?.generation
+  const catalog = gen?.catalog
+  const recommended = gen?.recommendedBackend
+  const vram = gen?.vramGb ?? 0
+  const recommendedLabel = recommended
+    ? (catalog?.[recommended]?.label ?? BACKEND_LABELS[recommended] ?? recommended)
+    : ''
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -145,6 +152,15 @@ export default function SetupPage() {
                 <span className="flex items-center gap-1.5"><Dot ok={!!gen?.cuda} /> GPU/CUDA</span>
                 <span className="flex items-center gap-1.5"><Dot ok={!!gen?.triposr} /> TripoSR</span>
               </div>
+              {gen?.cuda && gen?.gpu && (
+                <p className="mt-2 text-[11px] text-slate-400">
+                  GPU detectada: <span className="text-slate-200">{gen.gpu}</span>
+                  {gen.vramGb ? <> · <span className="text-slate-200">{gen.vramGb} GB</span> de VRAM</> : null}
+                  {recommendedLabel && (
+                    <> · recomendado: <span className="text-brand-200">{recommendedLabel}</span></>
+                  )}
+                </p>
+              )}
             </div>
           </div>
           <StatusBadge ready={!!gen?.ready} />
@@ -155,20 +171,38 @@ export default function SetupPage() {
               Modelo de geração
             </label>
             <div className="flex flex-wrap gap-2">
-              {backends.map((b) => (
-                <button
-                  key={b}
-                  onClick={() => { void localSetBackend(b).then(() => setBackend(b)) }}
-                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-                    backend === b
-                      ? 'border-brand-500/50 bg-brand-600/15 text-brand-100'
-                      : 'border-white/10 bg-slate-800/40 text-slate-300 hover:bg-slate-800/70'
-                  }`}
-                >
-                  {BACKEND_LABELS[b] ?? b}
-                </button>
-              ))}
+              {backends.map((b) => {
+                const info = catalog?.[b]
+                const label = info?.label ?? BACKEND_LABELS[b] ?? b
+                const isRec = b === recommended
+                const tooHeavy = !!info && vram > 0 && info.minVramGb > vram
+                return (
+                  <button
+                    key={b}
+                    onClick={() => { void localSetBackend(b).then(() => setBackend(b)) }}
+                    title={info ? `${info.note} (mín. ${info.minVramGb} GB${info.texture ? ' · textura PBR' : ''})` : undefined}
+                    className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                      backend === b
+                        ? 'border-brand-500/50 bg-brand-600/15 text-brand-100'
+                        : 'border-white/10 bg-slate-800/40 text-slate-300 hover:bg-slate-800/70'
+                    }`}
+                  >
+                    {label}
+                    {info?.texture && <span className="text-[9px] text-fuchsia-300">PBR</span>}
+                    {isRec && <span className="rounded bg-brand-500/20 px-1 text-[9px] text-brand-200">recomendado</span>}
+                    {tooHeavy && <span className="rounded bg-amber-500/20 px-1 text-[9px] text-amber-300">{info!.minVramGb}GB+</span>}
+                  </button>
+                )
+              })}
             </div>
+            {catalog?.[backend] && (
+              <p className="mt-2 text-[11px] text-slate-500">
+                {catalog[backend].note} Requer ~{catalog[backend].minVramGb} GB de VRAM
+                {catalog[backend].texture ? ' e gera textura PBR.' : '.'}
+                {vram > 0 && catalog[backend].minVramGb > vram &&
+                  ' Sua GPU pode não ter VRAM suficiente — se falhar, o app cai para o TripoSR.'}
+              </p>
+            )}
           </div>
         )}
         <button

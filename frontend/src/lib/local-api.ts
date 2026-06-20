@@ -81,9 +81,30 @@ export async function localUpload(file: File): Promise<GenerationJob> {
 
 // ── Setup / diagnóstico / provisionamento ──────────────────────────────────────
 
+export interface BackendInfo {
+  label: string
+  minVramGb: number
+  texture: boolean
+  note: string
+}
+
 export interface LocalDiagnostics {
   rigging: { blender: boolean; blenderPath: string | null; template: boolean; ready: boolean }
-  generation: { torch: boolean; diffusers: boolean; triposr: boolean; cuda: boolean; ready: boolean }
+  generation: {
+    torch: boolean
+    diffusers: boolean
+    triposr: boolean
+    cuda: boolean
+    ready: boolean
+    /** GPU name, e.g. "NVIDIA GeForce RTX 4080" (empty on CPU). */
+    gpu?: string
+    /** Total VRAM in GB (0 when unknown / CPU). */
+    vramGb?: number
+    /** Best backend for the detected VRAM. */
+    recommendedBackend?: string
+    /** Backend catalog keyed by backend id. */
+    catalog?: Record<string, BackendInfo>
+  }
   python: string
   backend: string
 }

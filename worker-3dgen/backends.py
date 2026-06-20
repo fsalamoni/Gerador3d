@@ -62,6 +62,71 @@ def cuda_available() -> bool:
         return False
 
 
+def gpu_info() -> dict:
+    """Informações da GPU para escolher o melhor backend.
+
+    Retorna {name, vramGb, cuda}. Em CPU (ou sem torch) devolve cuda=False e
+    vramGb=0. Tolerante a falhas: nunca levanta — o diagnóstico depende disto.
+    """
+    info = {"name": "", "vramGb": 0.0, "cuda": False}
+    try:
+        torch = get_torch()
+        if not torch.cuda.is_available():
+            return info
+        props = torch.cuda.get_device_properties(0)
+        info["name"] = props.name
+        info["vramGb"] = round(props.total_memory / (1024 ** 3), 1)
+        info["cuda"] = True
+    except Exception:
+        pass
+    return info
+
+
+# Catálogo de backends para a UI: o que cada um exige e produz. `minVramGb` é o
+# mínimo prático para a geração rodar sem estourar a memória (com offload).
+BACKEND_CATALOG = {
+    "triposr": {
+        "label": "TripoSR",
+        "minVramGb": 6,
+        "texture": False,
+        "note": "Rápido, leve, sem textura PBR. Ótimo para começar (MIT).",
+    },
+    "hunyuan-mini": {
+        "label": "Hunyuan3D-2mini",
+        "minVramGb": 12,
+        "texture": True,
+        "note": "Geometria + textura PBR de alta qualidade. Pesado.",
+    },
+    "trellis": {
+        "label": "TRELLIS",
+        "minVramGb": 16,
+        "texture": True,
+        "note": "Qualidade alta com textura (Microsoft, MIT). Linux/16GB+.",
+    },
+    "hunyuan": {
+        "label": "Hunyuan3D-2.1",
+        "minVramGb": 24,
+        "texture": True,
+        "note": "Texturas PBR excelentes. Exige bastante VRAM.",
+    },
+}
+
+
+def recommend_backend(vram_gb: float) -> str:
+    """Melhor backend prático para a VRAM disponível.
+
+    Prioriza qualidade com textura PBR quando há VRAM suficiente, caindo para o
+    TripoSR (leve, sem textura) em GPUs menores ou em CPU.
+    """
+    if vram_gb >= 24:
+        return "hunyuan"
+    if vram_gb >= 16:
+        return "trellis"
+    if vram_gb >= 12:
+        return "hunyuan-mini"
+    return "triposr"
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Texto → imagem (para alimentar os modelos imagem→3D em pedidos text_to_3d)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -249,17 +314,30 @@ def _trellis(task, prompt, image_path, out_path, progress, params=None):
 # https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _hunyuan(task, prompt, image_path, out_path, progress, params=None):
+def _run_hunyuan(cache_key, default_model, task, prompt, image_path, out_path,
+                 progress, params=None):
+    """Núcleo compartilhado pelos backends Hunyuan3D (2.1 e 2mini).
+
+    A variante é escolhida pelo modelo (`default_model`/HUNYUAN_MODEL). Ambas
+    usam o mesmo pacote `hy3dshape` do repositório Hunyuan3D-2.
+    """
     params = params or {}
     if progress:
-        progress(20, "carregando Hunyuan3D")
-    if "hunyuan" not in _MODELS:
+        progress(20, f"carregando {cache_key}")
+    if cache_key not in _MODELS:
         _ensure_local_repo_on_path("Hunyuan3D-2", "Hunyuan3D-2.1", "Hunyuan3D-2GP")
         from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
-        pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
-            os.environ.get("HUNYUAN_MODEL", "tencent/Hunyuan3D-2.1"))
-        _MODELS["hunyuan"] = pipe
-    pipe = _MODELS["hunyuan"]
+        model_id = os.environ.get("HUNYUAN_MODEL", default_model)
+        subfolder = os.environ.get("HUNYUAN_SUBFOLDER", "")
+        kwargs = {"subfolder": subfolder} if subfolder else {}
+        pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(model_id, **kwargs)
+        if cuda_available() and hasattr(pipe, "enable_flashvdm"):
+            try:
+                pipe.enable_flashvdm()  # reduz VRAM no caminho mini
+            except Exception:
+                pass
+        _MODELS[cache_key] = pipe
+    pipe = _MODELS[cache_key]
 
     if task == "text_to_3d" or not image_path:
         tmp = str(Path(tempfile.gettempdir()) / "gr3d_t2i.png")
@@ -273,10 +351,22 @@ def _hunyuan(task, prompt, image_path, out_path, progress, params=None):
     mesh.export(out_path)
 
 
+def _hunyuan(task, prompt, image_path, out_path, progress, params=None):
+    _run_hunyuan("hunyuan", "tencent/Hunyuan3D-2.1",
+                 task, prompt, image_path, out_path, progress, params)
+
+
+def _hunyuan_mini(task, prompt, image_path, out_path, progress, params=None):
+    # Hunyuan3D-2mini: pipeline DiT menor (cabe em ~12-16GB com flashvdm).
+    _run_hunyuan("hunyuan-mini", "tencent/Hunyuan3D-2mini",
+                 task, prompt, image_path, out_path, progress, params)
+
+
 _BACKENDS = {
     "triposr": _triposr,
     "trellis": _trellis,
     "hunyuan": _hunyuan,
+    "hunyuan-mini": _hunyuan_mini,
 }
 
 

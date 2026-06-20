@@ -278,16 +278,19 @@ def ensure_basis(mesh_obj):
         mesh_obj.shape_key_add(name="Basis", from_mix=False)
 
 
-def transfer_blendshapes_kdtree(user, template):
-    """Transferência robusta por vizinho-mais-próximo (KDTree).
+def transfer_blendshapes_kdtree(user, template, k_neighbors=6):
+    """Transferência robusta por K-vizinhos-mais-próximos ponderados (KDTree).
 
     Funciona mesmo quando o Surface Deform NÃO consegue fazer o bind — o caso
     comum em malhas geradas por IA (TripoSR/etc.), que têm topologia arbitrária
     e não são "envolvidas" por um único esferoide. Para cada vértice do usuário
-    achamos o vértice de Basis do template mais próximo (em coordenadas de mundo)
-    e aplicamos o MESMO deslocamento (delta) que aquele vértice sofre em cada
-    shape key. Assim SEMPRE geramos os morph targets ARKit — o que faz as feições
-    faciais aparecerem no estúdio. Devolve a lista de shape keys criadas."""
+    pegamos os K vértices de Basis do template mais próximos (em coordenadas de
+    mundo) e aplicamos uma MÉDIA dos deslocamentos (deltas) deles, ponderada por
+    distância inversa. Isso suaviza o campo de deformação: o vizinho único produz
+    facetamento (blocos) quando a malha do usuário é mais densa que o template;
+    a média ponderada gera expressões contínuas e naturais. Assim SEMPRE geramos
+    os morph targets ARKit — o que faz as feições aparecerem no estúdio. Devolve
+    a lista de shape keys criadas."""
     from mathutils.kdtree import KDTree
 
     t_keys = template.data.shape_keys
@@ -308,8 +311,18 @@ def transfer_blendshapes_kdtree(user, template):
     u_basis = user.data.shape_keys.key_blocks[0]
     n_user = len(user.data.vertices)
 
-    # Vizinho do template para cada vértice do usuário (calculado uma única vez).
-    nearest = [kd.find(u_mw @ v.co)[1] for v in user.data.vertices]
+    # Para cada vértice do usuário, pré-computa os K vizinhos do template e seus
+    # pesos por distância inversa (calculado uma única vez; reaproveitado em todas
+    # as shape keys). Mais perto pesa mais; o eps evita divisão por zero quando o
+    # vértice coincide com o do template.
+    k = max(1, min(k_neighbors, n_t))
+    neighbors = []  # lista de (lista_de_indices, lista_de_pesos_normalizados)
+    for v in user.data.vertices:
+        hits = kd.find_n(u_mw @ v.co, k)
+        idxs = [idx for (_co, idx, _dist) in hits]
+        raw = [1.0 / (dist + 1e-6) for (_co, _idx, dist) in hits]
+        s = sum(raw) or 1.0
+        neighbors.append((idxs, [w / s for w in raw]))
 
     transfer_keys = [kb for kb in t_keys.key_blocks if kb.name.lower() != "basis"]
     total = max(1, len(transfer_keys))
@@ -320,10 +333,15 @@ def transfer_blendshapes_kdtree(user, template):
         deltas = [u_mw_inv3 @ ((t_mw @ kb.data[i].co) - tb_world[i]) for i in range(n_t)]
         new_key = user.shape_key_add(name=kb.name, from_mix=False)
         for j in range(n_user):
-            new_key.data[j].co = u_basis.data[j].co + deltas[nearest[j]]
+            idxs, weights = neighbors[j]
+            d = Vector((0.0, 0.0, 0.0))
+            for idx, w in zip(idxs, weights):
+                d += deltas[idx] * w
+            new_key.data[j].co = u_basis.data[j].co + d
         new_key.value = 0.0
         created.append(kb.name)
-    log(f"Transferidas {len(created)} shape keys via KDTree (vizinho mais próximo).")
+    log(f"Transferidas {len(created)} shape keys via KDTree "
+        f"({k} vizinhos ponderados por distância).")
     return created
 
 

@@ -414,7 +414,8 @@ def provision_generation(data_dir: Path):
               "PyMCubes", "rembg", "onnxruntime"])
         _pset(progress=95)
 
-        _CUDA_CACHE["checked"] = False  # re-checa CUDA depois de instalar o torch
+        _CUDA_CACHE["checked"] = False  # re-checa CUDA/GPU depois de instalar o torch
+        _CUDA_CACHE["gpu_checked"] = False
         _pset(progress=100, ok=True)
         _plog("Geração 3D instalada com sucesso! Você já pode gerar texto/imagem → 3D.")
     except Exception as e:  # noqa: BLE001
@@ -506,12 +507,26 @@ def cuda_available_cached():
     return _CUDA_CACHE["value"]
 
 
+def gpu_info_cached():
+    """GPU (nome/VRAM/CUDA) com cache — invalida junto com o cache de CUDA, que
+    é resetado após instalar o torch."""
+    if not _CUDA_CACHE.get("gpu_checked"):
+        try:
+            _CUDA_CACHE["gpu"] = genbackends.gpu_info()
+        except Exception:
+            _CUDA_CACHE["gpu"] = {"name": "", "vramGb": 0.0, "cuda": False}
+        _CUDA_CACHE["gpu_checked"] = True
+    return _CUDA_CACHE["gpu"]
+
+
 def diagnostics(data_dir: Path):
     blender = resolve_blender(data_dir)
     template = rigmod.find_template()
     torch_ok = importlib.util.find_spec("torch") is not None
     diffusers_ok = importlib.util.find_spec("diffusers") is not None
     triposr_ok = (GEN_DIR / "TripoSR").exists() or importlib.util.find_spec("tsr") is not None
+    gpu = gpu_info_cached() if torch_ok else {"name": "", "vramGb": 0.0, "cuda": False}
+    recommended = genbackends.recommend_backend(gpu.get("vramGb", 0.0))
     return {
         "rigging": {
             "blender": bool(blender),
@@ -523,7 +538,11 @@ def diagnostics(data_dir: Path):
             "torch": torch_ok,
             "diffusers": diffusers_ok,
             "triposr": triposr_ok,
-            "cuda": cuda_available_cached() if torch_ok else False,
+            "cuda": gpu.get("cuda", False),
+            "gpu": gpu.get("name", ""),
+            "vramGb": gpu.get("vramGb", 0.0),
+            "recommendedBackend": recommended,
+            "catalog": genbackends.BACKEND_CATALOG,
             "ready": bool(torch_ok and triposr_ok),
         },
         "python": sys.executable,

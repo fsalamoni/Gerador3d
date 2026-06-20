@@ -1,6 +1,10 @@
 /**
  * useFaceTracking — manages the webcam + FaceTracker lifecycle and forwards
  * each tracking frame to a callback. Shared by the Studio and the OBS view.
+ *
+ * Every frame is passed through a {@link FaceStabilizer} first (One-Euro
+ * smoothing + neutral-face calibration), so consumers receive a stable,
+ * personalized signal. Call `calibrate()` while holding a relaxed face.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -9,6 +13,7 @@ import {
   stopWebcam,
   type FaceFrame,
 } from '../lib/face-tracking'
+import { FaceStabilizer } from '../lib/face-smoothing'
 
 export type TrackingStatus = 'idle' | 'loading' | 'running' | 'error'
 
@@ -17,8 +22,11 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
   const trackerRef = useRef<FaceTracker | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const onFrameRef = useRef(onFrame)
+  const stabilizerRef = useRef<FaceStabilizer>(new FaceStabilizer())
   const [status, setStatus] = useState<TrackingStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [calibrating, setCalibrating] = useState(false)
+  const [calibrated, setCalibrated] = useState(false)
 
   useEffect(() => {
     onFrameRef.current = onFrame
@@ -33,7 +41,10 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
       trackerRef.current = tracker
       await tracker.init()
       streamRef.current = await startWebcam(videoRef.current)
-      tracker.start(videoRef.current, (frame) => onFrameRef.current(frame))
+      tracker.start(videoRef.current, (frame) => {
+        const stable = stabilizerRef.current.process(frame, performance.now())
+        onFrameRef.current(stable)
+      })
       setStatus('running')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Tracking failed.')
@@ -48,6 +59,22 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
     setStatus('idle')
   }, [])
 
+  /** Capture the user's neutral face as the expression baseline. */
+  const calibrate = useCallback(() => {
+    setCalibrating(true)
+    stabilizerRef.current.beginCalibration(30, () => {
+      setCalibrating(false)
+      setCalibrated(true)
+    })
+  }, [])
+
+  /** Drop calibration and smoothing history. */
+  const resetCalibration = useCallback(() => {
+    stabilizerRef.current.reset()
+    setCalibrated(false)
+    setCalibrating(false)
+  }, [])
+
   useEffect(() => {
     return () => {
       trackerRef.current?.dispose()
@@ -55,5 +82,15 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
     }
   }, [])
 
-  return { videoRef, status, error, start, stop }
+  return {
+    videoRef,
+    status,
+    error,
+    start,
+    stop,
+    calibrate,
+    resetCalibration,
+    calibrating,
+    calibrated,
+  }
 }

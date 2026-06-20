@@ -10,6 +10,8 @@ import {
   Video,
   ExternalLink,
   Info,
+  ScanFace,
+  Check,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import AvatarCanvas, { type AvatarCanvasHandle } from '../components/AvatarCanvas'
@@ -27,9 +29,16 @@ export default function StudioPage() {
   const avatarRef = useRef<AvatarCanvasHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const { videoRef, status, error, start, stop } = useFaceTracking((frame) =>
-    avatarRef.current?.applyFrame(frame),
-  )
+  const {
+    videoRef,
+    status,
+    error,
+    start,
+    stop,
+    calibrate,
+    calibrating,
+    calibrated,
+  } = useFaceTracking((frame) => avatarRef.current?.applyFrame(frame))
 
   const [source, setSource] = useState<Source>({ kind: 'none' })
   const [jobs, setJobs] = useState<GenerationJob[]>([])
@@ -134,8 +143,37 @@ export default function StudioPage() {
                 {t('studio.startCamera')}
               </button>
             )}
+            {running && (
+              <button
+                type="button"
+                onClick={calibrate}
+                disabled={calibrating}
+                className={`mt-2 flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition disabled:opacity-60 ${
+                  calibrated
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                    : 'border-white/10 text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                {calibrating ? (
+                  <>
+                    <ScanFace className="h-4 w-4 animate-pulse" />
+                    {t('studio.calibrating')}
+                  </>
+                ) : calibrated ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    {t('studio.recalibrate')}
+                  </>
+                ) : (
+                  <>
+                    <ScanFace className="h-4 w-4" />
+                    {t('studio.calibrate')}
+                  </>
+                )}
+              </button>
+            )}
             <p className="mt-2 text-center text-[11px] text-slate-500">
-              {t('studio.permissionHint')}
+              {running ? t('studio.calibrateHint') : t('studio.permissionHint')}
             </p>
           </div>
 
