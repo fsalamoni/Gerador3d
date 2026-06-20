@@ -36,6 +36,17 @@ export default function GeneratePage() {
   const diag = useLocalReadiness(IS_LOCAL ? 4000 : 0)
   const genReady = !IS_LOCAL || Boolean(diag?.generation.ready)
 
+  // Active generation backend + whether a better installable one is recommended.
+  const activeBackend = diag?.backend ?? 'triposr'
+  const backendLabel =
+    diag?.generation.catalog?.[activeBackend]?.label ?? activeBackend
+  const recommended = diag?.generation.recommendedBackend
+  const recommendLabel = recommended
+    ? (diag?.generation.catalog?.[recommended]?.label ?? recommended)
+    : ''
+  const suggestUpgrade =
+    IS_LOCAL && genReady && recommended && recommended !== activeBackend
+
   useEffect(() => {
     void resolveTaskModel(task).then(setModelId)
   }, [task])
@@ -191,9 +202,23 @@ export default function GeneratePage() {
           {/* Engine / model indicator */}
           {IS_LOCAL ? (
             genReady ? (
-              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
-                <Cpu className="h-3.5 w-3.5 text-brand-300" />
-                Geração local · TripoSR (na sua GPU)
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+                  <Cpu className="h-3.5 w-3.5 text-brand-300" />
+                  Geração local · {backendLabel} (na sua GPU)
+                  {diag?.generation.vramGb ? (
+                    <span className="ml-auto text-slate-500">{diag.generation.vramGb} GB VRAM</span>
+                  ) : null}
+                </div>
+                {suggestUpgrade && (
+                  <Link
+                    to="/app/setup"
+                    className="flex items-center gap-1.5 rounded-lg border border-brand-500/30 bg-brand-600/10 px-3 py-1.5 text-[11px] text-brand-200 transition hover:bg-brand-600/20"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    Sua GPU comporta {recommendLabel} (mais qualidade). Instalar na Configuração →
+                  </Link>
+                )}
               </div>
             ) : (
               <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
