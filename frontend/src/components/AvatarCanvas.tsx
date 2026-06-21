@@ -31,6 +31,7 @@ import {
   loadLandmarks,
   type FaceLandmarks,
 } from '../lib/procedural-face-rig'
+import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
 export interface PickHit {
@@ -54,6 +55,9 @@ export interface AvatarCanvasHandle {
   /** Preview a single morph (0..1) with the camera off. */
   previewMorph: (name: string, value: number) => void
   clearPreview: () => void
+  /** Bake the rigged avatar to a downloadable file (.glb keeps the whole model;
+   * .vrm wraps the face mesh with a humanoid skeleton + VRM blendshapes). */
+  exportAvatar: (format: 'glb' | 'vrm', meta?: VrmMeta) => Promise<ArrayBuffer>
 }
 
 interface Props {
@@ -158,6 +162,18 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       previewRef.current = null
       const mesh = faceMeshRef.current
       if (mesh?.morphTargetInfluences) mesh.morphTargetInfluences.fill(0)
+    },
+    exportAvatar: (format, meta) => {
+      if (format === 'vrm') {
+        const mesh = faceMeshRef.current
+        if (!mesh) return Promise.reject(new Error('Sem malha de rosto para exportar.'))
+        // Neutralize any preview weights so the rest pose is exported.
+        if (mesh.morphTargetInfluences) mesh.morphTargetInfluences.fill(0)
+        return exportVrm(mesh, meta ?? {})
+      }
+      const root = rootRef.current
+      if (!root) return Promise.reject(new Error('Sem modelo para exportar.'))
+      return exportGlb(root)
     },
   }))
 

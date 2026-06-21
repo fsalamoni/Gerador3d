@@ -3,6 +3,7 @@
  * AvatarCanvas), with an avatar source selector and an OBS-capture link.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Camera,
   CameraOff,
@@ -41,14 +42,31 @@ export default function StudioPage() {
     calibrated,
   } = useFaceTracking((frame) => avatarRef.current?.applyFrame(frame))
 
-  const [source, setSource] = useState<Source>({ kind: 'none' })
+  const [searchParams] = useSearchParams()
+  const [source, setSource] = useState<Source>(() => {
+    const m = searchParams.get('model')
+    const k = searchParams.get('kind')
+    if (m && (k === 'vrm' || k === 'glb')) return { kind: k, url: m, label: 'Da biblioteca' }
+    return { kind: 'none' }
+  })
   const [jobs, setJobs] = useState<GenerationJob[]>([])
   const [rigMode, setRigMode] = useState(false)
+  const firstSourceChange = useRef(true)
 
   useEffect(() => subscribeJobs(setJobs), [])
 
-  // Leaving a model resets rig mode (the panel targets the current model).
+  // Library "Preparar rig" deep-links here (?model=…&rig=1): open rig mode once.
   useEffect(() => {
+    if (searchParams.get('rig') === '1' && source.kind !== 'none') setRigMode(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Changing the model (after mount) leaves rig mode (the panel targets one model).
+  useEffect(() => {
+    if (firstSourceChange.current) {
+      firstSourceChange.current = false
+      return
+    }
     setRigMode(false)
   }, [source])
 

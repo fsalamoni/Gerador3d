@@ -8,13 +8,26 @@
  * Landmarks are saved per model so the rig persists on reload and in OBS.
  */
 import { useCallback, useEffect, useState, type RefObject } from 'react'
-import { ScanFace, RotateCcw, Sparkles, Check, X } from 'lucide-react'
+import { ScanFace, RotateCcw, Sparkles, Check, X, Download, Save } from 'lucide-react'
 import type { AvatarCanvasHandle } from './AvatarCanvas'
 import {
   saveLandmarks,
   type FaceLandmarks,
   type LandmarkKey,
 } from '../lib/procedural-face-rig'
+import { upload3DModel } from '../lib/upload-service'
+
+function downloadBytes(buf: ArrayBuffer, filename: string): void {
+  const blob = new Blob([buf], { type: 'model/gltf-binary' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
 
 interface StepDef {
   key: LandmarkKey
@@ -33,6 +46,7 @@ const STEPS: StepDef[] = [
 ]
 
 const REQUIRED: LandmarkKey[] = ['eyeLeft', 'eyeRight', 'mouthLeft', 'mouthRight']
+const AVATAR_META = { title: 'Gerador3D Avatar', author: 'Gerador3D' }
 
 type Marks = Partial<Record<LandmarkKey, [number, number, number]>>
 
@@ -51,6 +65,8 @@ export default function FaceRigPanel({
   const [marks, setMarks] = useState<Marks>({})
   const [built, setBuilt] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<'' | 'vrm' | 'glb' | 'save'>('')
+  const [saved, setSaved] = useState(false)
 
   const ready = REQUIRED.every((k) => marks[k])
   const picking = step < STEPS.length && !built
@@ -112,6 +128,38 @@ export default function FaceRigPanel({
     avatar.current?.clearPreview()
     onClose()
   }, [avatar, onClose])
+
+  const downloadFile = useCallback(async (fmt: 'vrm' | 'glb') => {
+    const a = avatar.current
+    if (!a) return
+    setBusy(fmt)
+    setError(null)
+    try {
+      const buf = await a.exportAvatar(fmt, AVATAR_META)
+      downloadBytes(buf, fmt === 'vrm' ? 'avatar.vrm' : 'avatar-riggado.glb')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao exportar.')
+    } finally {
+      setBusy('')
+    }
+  }, [avatar])
+
+  const saveToLibrary = useCallback(async () => {
+    const a = avatar.current
+    if (!a) return
+    setBusy('save')
+    setError(null)
+    try {
+      const buf = await a.exportAvatar('vrm', AVATAR_META)
+      const file = new File([buf], `avatar-${Date.now()}.vrm`, { type: 'model/gltf-binary' })
+      await upload3DModel(file)
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao salvar.')
+    } finally {
+      setBusy('')
+    }
+  }, [avatar])
 
   return (
     <div className="rounded-2xl border border-brand-500/30 bg-brand-600/[0.06] p-4">
@@ -205,6 +253,43 @@ export default function FaceRigPanel({
             <TestBtn label="Piscar" onDown={() => { preview('eyeBlinkLeft', 1); preview('eyeBlinkRight', 1) }} onUp={() => { preview('eyeBlinkLeft', 0); preview('eyeBlinkRight', 0) }} />
             <TestBtn label="Bico (ou)" onDown={() => preview('mouthPucker', 1)} onUp={() => preview('mouthPucker', 0)} />
           </div>
+
+          <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">
+            Exportar avatar (com expressões)
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={saveToLibrary}
+              disabled={busy !== ''}
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-600/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-600/25 disabled:opacity-50"
+            >
+              {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+              {busy === 'save' ? 'Salvando…' : saved ? 'Salvo!' : 'Salvar na biblioteca'}
+            </button>
+            <button
+              onClick={() => downloadFile('vrm')}
+              disabled={busy !== ''}
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-slate-800/40 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/70 disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {busy === 'vrm' ? 'Gerando…' : 'Baixar .vrm'}
+            </button>
+          </div>
+          <button
+            onClick={() => downloadFile('glb')}
+            disabled={busy !== ''}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-[11px] text-slate-400 transition hover:bg-white/5 disabled:opacity-50"
+          >
+            <Download className="h-3 w-3" />
+            {busy === 'glb' ? 'Gerando…' : 'Baixar .glb (com morphs)'}
+          </button>
+          <p className="mt-1.5 text-[10px] text-slate-500">
+            .vrm com esqueleto + expressões para VSeeFace/VTube Studio · .glb com morphs ARKit.
+          </p>
+          {error && (
+            <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">{error}</p>
+          )}
+
           <div className="mt-3 flex gap-2">
             <button
               onClick={reset}

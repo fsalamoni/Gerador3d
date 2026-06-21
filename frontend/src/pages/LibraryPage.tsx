@@ -2,7 +2,7 @@
  * LibraryPage — grid of generated 3D models with live status + 3D preview.
  */
 import { useEffect, useState, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Download, Sparkles, Video, Bone, UploadCloud, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { subscribeJobs, deleteJob } from '../lib/jobs-store'
@@ -19,10 +19,9 @@ const STATUS_STYLES: Record<string, string> = {
   canceled: 'bg-slate-500/20 text-slate-400',
 }
 
-import { startGeneration } from '../lib/generation-client'
-
 export default function LibraryPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const [jobs, setJobs] = useState<GenerationJob[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -49,20 +48,15 @@ export default function LibraryPage() {
     }
   }
 
-  const handleRigging = async (job: GenerationJob) => {
-    if (!job.outputs?.glbUrl) return
-    try {
-      // Pass the source model URL as `prompt`; the Cloud Function creates the
-      // rigging job in Firestore and dispatches it to the local worker. The new
-      // job then appears in this grid via `subscribeJobs`.
-      await startGeneration({
-        task: 'rigging',
-        prompt: job.outputs.glbUrl,
-      })
-    } catch (err) {
-      console.error('Rigging dispatch failed:', err)
-      alert(t('library.riggingFailed') || 'Failed to start rigging')
-    }
+  // "Preparar rig" → open the Studio's facial-rig flow on this model: the user
+  // marks eyes/mouth/jaw and we synthesize expressions + a downloadable VRM. This
+  // works for ANY topology (humans and creatures), unlike the old human-template
+  // transfer, and lets the user verify/test the result live.
+  const handleRigging = (job: GenerationJob) => {
+    const url = job.outputs?.glbUrl
+    if (!url) return
+    const kind = url.toLowerCase().endsWith('.vrm') ? 'vrm' : 'glb'
+    navigate(`/app/studio?model=${encodeURIComponent(url)}&kind=${kind}&rig=1`)
   }
 
   const handleDelete = async (jobId: string) => {
