@@ -1,59 +1,70 @@
 /**
- * Procedural facial rig — generates ARKit-named blendshapes (morph targets) on
- * ANY mesh from a handful of user-placed landmarks. This is what makes the live
- * studio drive expressions (mouth, eyes, jaw, smile) on meshes that ship without
- * blendshapes — generated TripoSR/Hunyuan models AND non-human creatures, where
- * transferring a human face template never aligns.
+ * Procedural facial rig — generates the full high-impact ARKit blendshape set on
+ * ANY mesh from a handful of user-placed landmarks. This is what lets the live
+ * studio (and an exported VRM) drive real speech + expressions — open/close
+ * mouth, smile/frown, blink/squint/wide, brows, jaw sideways/forward, cheeks,
+ * nose, tongue — on humans AND non-human creatures, where transferring a human
+ * face template never aligns.
  *
- * Why landmarks instead of a template? A dragon's snout, a robot's faceplate and
- * a human face share no topology, so deformation-transfer from a human template
- * produces garbage. But "where the mouth corners / eyes / jaw are" is something a
- * human can mark in five clicks — and from those we can synthesize plausible
- * expressions procedurally, with a face-local coordinate frame derived from the
- * marks (so it works regardless of the model's orientation or scale).
+ * Approach: from the marks we build a face-local frame (right/up/forward, derived
+ * from the landmarks so it's orientation-independent) and synthesize each
+ * blendshape as anatomically-plausible vertex displacement with Gaussian falloff.
+ * The upper/lower-lip landmarks make the mouth open by parting the lips (not just
+ * dropping a block), which reads far better. Strength is tunable via `gain`.
  *
- * The generated morphs are named exactly like the ARKit blendshapes MediaPipe
- * emits (jawOpen, mouthSmileLeft, …), so {@link applyFaceToGlbMorphs} drives them
- * 1:1 from the webcam with no extra mapping.
+ * Shapes are named exactly like MediaPipe's ARKit categories, so
+ * {@link applyFaceToGlbMorphs} drives them 1:1 from the webcam.
  */
 import * as THREE from 'three'
 
-export type LandmarkKey = 'eyeLeft' | 'eyeRight' | 'mouthLeft' | 'mouthRight' | 'jaw'
+export type LandmarkKey =
+  | 'eyeLeft' | 'eyeRight'
+  | 'mouthLeft' | 'mouthRight'
+  | 'upperLip' | 'lowerLip'
+  | 'browLeft' | 'browRight'
+  | 'jaw'
 
 /** Landmark positions in the target mesh's LOCAL space (geometry coordinates). */
 export interface FaceLandmarks {
-  eyeLeft: [number, number, number]
-  eyeRight: [number, number, number]
-  mouthLeft: [number, number, number]
-  mouthRight: [number, number, number]
-  /** Chin / lowest jaw point. Optional — improves the jaw-open motion. */
-  jaw?: [number, number, number]
+  eyeLeft: V3
+  eyeRight: V3
+  mouthLeft: V3
+  mouthRight: V3
+  upperLip: V3
+  lowerLip: V3
+  browLeft?: V3
+  browRight?: V3
+  jaw?: V3
 }
+type V3 = [number, number, number]
 
-/** The morph targets this rig generates (subset of ARKit, the high-impact ones). */
+/** The ARKit morph targets this rig generates (the high-impact subset). */
 export const GENERATED_SHAPES = [
-  'jawOpen',
-  'mouthSmileLeft',
-  'mouthSmileRight',
-  'mouthFunnel',
-  'mouthPucker',
-  'eyeBlinkLeft',
-  'eyeBlinkRight',
+  'jawOpen', 'mouthClose', 'jawForward', 'jawLeft', 'jawRight',
+  'mouthFunnel', 'mouthPucker', 'mouthLeft', 'mouthRight',
+  'mouthSmileLeft', 'mouthSmileRight', 'mouthFrownLeft', 'mouthFrownRight',
+  'mouthStretchLeft', 'mouthStretchRight', 'mouthDimpleLeft', 'mouthDimpleRight',
+  'mouthUpperUpLeft', 'mouthUpperUpRight', 'mouthLowerDownLeft', 'mouthLowerDownRight',
+  'mouthShrugUpper', 'mouthShrugLower', 'mouthRollUpper', 'mouthRollLower',
+  'mouthPressLeft', 'mouthPressRight',
+  'eyeBlinkLeft', 'eyeBlinkRight', 'eyeSquintLeft', 'eyeSquintRight',
+  'eyeWideLeft', 'eyeWideRight',
+  'browInnerUp', 'browDownLeft', 'browDownRight', 'browOuterUpLeft', 'browOuterUpRight',
+  'cheekPuff', 'cheekSquintLeft', 'cheekSquintRight', 'noseSneerLeft', 'noseSneerRight',
+  'tongueOut',
 ] as const
 
-const v = (a: [number, number, number]) => new THREE.Vector3(a[0], a[1], a[2])
+const v = (a: V3) => new THREE.Vector3(a[0], a[1], a[2])
 const gauss = (d: number, sigma: number) => Math.exp(-(d * d) / (2 * sigma * sigma))
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 
 /**
- * Generate procedural morph targets on `mesh` from `lm`. Adds (relative) morph
- * attributes named per {@link GENERATED_SHAPES}, refreshes the mesh's
- * morphTargetDictionary/Influences, and returns the created names.
- *
- * Replaces any morphs of the same name created by a previous run (so re-marking
- * is idempotent). No-op-safe: throws only if the geometry has no positions.
+ * Generate procedural morph targets on `mesh` from `lm`. `gain` scales the
+ * overall expression strength (1 = natural, higher = more exaggerated). Adds
+ * (relative) morph attributes named per {@link GENERATED_SHAPES}, refreshes the
+ * mesh's morphTargetDictionary/Influences, and returns the created names.
  */
-export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks): string[] {
+export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks, gain = 1.5): string[] {
   const geo = mesh.geometry as THREE.BufferGeometry
   const pos = geo.getAttribute('position') as THREE.BufferAttribute | undefined
   if (!pos) throw new Error('A malha selecionada não tem vértices (position).')
@@ -63,82 +74,141 @@ export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks): stri
   const eyeR = v(lm.eyeRight)
   const mouthL = v(lm.mouthLeft)
   const mouthR = v(lm.mouthRight)
+  const upLip = v(lm.upperLip)
+  const loLip = v(lm.lowerLip)
   const mouthC = mouthL.clone().add(mouthR).multiplyScalar(0.5)
   const eyeMid = eyeL.clone().add(eyeR).multiplyScalar(0.5)
 
-  // Face-local frame derived from the landmarks (orientation-independent).
-  const right = mouthR.clone().sub(mouthL).normalize() // mouthLeft → mouthRight
-  let up = eyeMid.clone().sub(mouthC)
-  up.addScaledVector(right, -up.dot(right)).normalize() // orthogonalize vs right
-  const forward = new THREE.Vector3().crossVectors(right, up).normalize()
-  // Make `forward` point OUT of the face: away from the mesh centroid.
+  // Face-local frame from the landmarks (orientation-independent).
+  const right = mouthR.clone().sub(mouthL).normalize()
+  const up = eyeMid.clone().sub(mouthC)
+  up.addScaledVector(right, -up.dot(right)).normalize()
+  const fwd = new THREE.Vector3().crossVectors(right, up).normalize()
   const centroid = meshCentroid(pos)
-  if (mouthC.clone().sub(centroid).dot(forward) < 0) forward.negate()
+  if (mouthC.clone().sub(centroid).dot(fwd) < 0) fwd.negate()
 
-  // Characteristic sizes — keep displacements proportional to the model.
+  // Scales.
   const mouthW = Math.max(1e-5, mouthL.distanceTo(mouthR))
+  const mouthH = Math.max(mouthW * 0.18, upLip.distanceTo(loLip))
   const eyeW = Math.max(1e-5, eyeL.distanceTo(eyeR))
   const faceH = Math.max(1e-5, eyeMid.distanceTo(mouthC))
-  const jawTip = lm.jaw ? v(lm.jaw) : mouthC.clone().addScaledVector(up, -faceH * 0.7)
+  const eyeR0 = eyeW * 0.18 // approx eye radius
 
-  // Smile directions: corner goes up and OUTWARD (away from mouth center).
-  const smileLDir = up.clone().multiplyScalar(1.0).addScaledVector(right, -0.6).normalize()
-  const smileRDir = up.clone().multiplyScalar(1.0).addScaledVector(right, 0.6).normalize()
+  // Derived points (used when explicit landmarks aren't given).
+  const browL = lm.browLeft ? v(lm.browLeft) : eyeL.clone().addScaledVector(up, eyeR0 * 1.8)
+  const browR = lm.browRight ? v(lm.browRight) : eyeR.clone().addScaledVector(up, eyeR0 * 1.8)
+  const browMid = browL.clone().add(browR).multiplyScalar(0.5)
+  const nose = mouthC.clone().addScaledVector(up, faceH * 0.42)
+  const cheekL = mouthL.clone().addScaledVector(up, faceH * 0.3).addScaledVector(right, -mouthW * 0.15)
+  const cheekR = mouthR.clone().addScaledVector(up, faceH * 0.3).addScaledVector(right, mouthW * 0.15)
+  const jawTip = lm.jaw ? v(lm.jaw) : mouthC.clone().addScaledVector(up, -faceH * 0.75)
 
-  // One Float32Array of deltas per generated shape.
+  // Common directions (outward = away from mouth center at each corner).
+  const outL = right.clone().negate()
+  const outR = right.clone()
+
   const deltas: Record<string, Float32Array> = {}
   for (const name of GENERATED_SHAPES) deltas[name] = new Float32Array(n * 3)
 
   const p = new THREE.Vector3()
   const tmp = new THREE.Vector3()
+  const mAmp = mouthW * 0.5 * gain // mouth displacement unit
+  const eAmp = eyeR0 * gain // eye displacement unit
+  const bAmp = eyeW * 0.18 * gain // brow displacement unit
+
   for (let i = 0; i < n; i++) {
     p.set(pos.getX(i), pos.getY(i), pos.getZ(i))
+    const belowMouth = mouthC.clone().sub(p).dot(up) // >0 below mouth line
+    const belowUpLip = upLip.clone().sub(p).dot(up) // >0 below the upper lip
 
-    // jawOpen: (a) lower face swings down+back around the jaw, hinge-like, and
-    // (b) the lower lip parts just below the mouth so the mouth visibly opens.
+    // ── JAW / OPEN ──────────────────────────────────────────────────────────
+    // Mouth opens by dropping the lower lip + chin while the upper lip stays.
     {
-      const below = mouthC.clone().sub(p).dot(up) // >0 below the mouth line
-      const region = gauss(p.distanceTo(jawTip), faceH * 1.1)
-      const gateJaw = clamp01(below / (faceH * 0.5))
-      const wJaw = region * gateJaw
-      if (wJaw > 1e-4) {
-        tmp.copy(up).multiplyScalar(-faceH * 0.9 * wJaw)
-        tmp.addScaledVector(forward, -faceH * 0.28 * wJaw)
-        addDelta(deltas.jawOpen, i, tmp)
-      }
-      if (below > 0) {
-        const wLip = gauss(p.distanceTo(mouthC), mouthW * 0.7) * clamp01(below / (mouthW * 0.5))
-        if (wLip > 1e-4) {
-          tmp.copy(up).multiplyScalar(-mouthW * 0.6 * wLip)
-          addDelta(deltas.jawOpen, i, tmp)
-        }
-      }
+      let w = 0
+      const wLip = gauss(p.distanceTo(loLip), mouthW * 0.6) * clamp01(belowUpLip / (mouthH * 0.5))
+      const wJaw = gauss(p.distanceTo(jawTip), faceH * 1.0) * clamp01(belowMouth / (faceH * 0.5))
+      w = wLip
+      add(deltas.jawOpen, i, tmp.copy(up).multiplyScalar(-(mouthH * 1.6 + faceH * 0.12) * gain * w))
+      add(deltas.jawOpen, i, tmp.copy(fwd).multiplyScalar(-faceH * 0.18 * gain * wJaw))
+      add(deltas.jawOpen, i, tmp.copy(up).multiplyScalar(-faceH * 0.5 * gain * wJaw))
+      // mouthClose: lower lip toward upper lip.
+      add(deltas.mouthClose, i, tmp.copy(up).multiplyScalar(mouthH * 0.7 * gain * wLip))
     }
-    // smile L/R: pull the mouth corner up and out.
-    addRadial(deltas.mouthSmileLeft, i, p, mouthL, mouthW * 0.55, smileLDir, mouthW * 0.42)
-    addRadial(deltas.mouthSmileRight, i, p, mouthR, mouthW * 0.55, smileRDir, mouthW * 0.42)
-    // funnel ("oh"): lips push forward, rounded.
-    addRadial(deltas.mouthFunnel, i, p, mouthC, mouthW * 0.5, forward, mouthW * 0.32)
-    // pucker ("ou"): forward + squeezed horizontally toward the mouth center.
+    // jaw sideways / forward (lower face region).
     {
-      const w = gauss(p.distanceTo(mouthC), mouthW * 0.5)
-      if (w > 1e-4) {
-        const lateral = mouthC.clone().sub(p)
-        const along = lateral.dot(right)
-        tmp.copy(forward).multiplyScalar(mouthW * 0.22 * w)
-        tmp.addScaledVector(right, along * 0.5 * w)
-        addDelta(deltas.mouthPucker, i, tmp)
-      }
+      const wj = gauss(p.distanceTo(jawTip), faceH * 1.0) * clamp01(belowMouth / (faceH * 0.4))
+      add(deltas.jawForward, i, tmp.copy(fwd).multiplyScalar(faceH * 0.3 * gain * wj))
+      add(deltas.jawLeft, i, tmp.copy(right).multiplyScalar(-faceH * 0.28 * gain * wj))
+      add(deltas.jawRight, i, tmp.copy(right).multiplyScalar(faceH * 0.28 * gain * wj))
     }
-    // blink L/R: upper-eyelid vertices drop toward the eye center.
-    addBlink(deltas.eyeBlinkLeft, i, p, eyeL, eyeW * 0.33, up)
-    addBlink(deltas.eyeBlinkRight, i, p, eyeR, eyeW * 0.33, up)
+
+    // ── LIPS / MOUTH SHAPES ─────────────────────────────────────────────────
+    radial(deltas.mouthSmileLeft, i, p, mouthL, mouthW * 0.55, dir(tmp, up, 1, right, -0.55), mAmp * 0.9)
+    radial(deltas.mouthSmileRight, i, p, mouthR, mouthW * 0.55, dir(tmp, up, 1, right, 0.55), mAmp * 0.9)
+    radial(deltas.mouthFrownLeft, i, p, mouthL, mouthW * 0.55, dir(tmp, up, -1, right, -0.4), mAmp * 0.8)
+    radial(deltas.mouthFrownRight, i, p, mouthR, mouthW * 0.55, dir(tmp, up, -1, right, 0.4), mAmp * 0.8)
+    radial(deltas.mouthStretchLeft, i, p, mouthL, mouthW * 0.5, outL, mAmp * 0.9)
+    radial(deltas.mouthStretchRight, i, p, mouthR, mouthW * 0.5, outR, mAmp * 0.9)
+    radial(deltas.mouthDimpleLeft, i, p, mouthL, mouthW * 0.4, dir(tmp, fwd, -1, right, -0.3), mAmp * 0.5)
+    radial(deltas.mouthDimpleRight, i, p, mouthR, mouthW * 0.4, dir(tmp, fwd, -1, right, 0.3), mAmp * 0.5)
+    // funnel (O) + pucker (U): forward, rounded / squeezed.
+    {
+      const wC = gauss(p.distanceTo(mouthC), mouthW * 0.55)
+      add(deltas.mouthFunnel, i, tmp.copy(fwd).multiplyScalar(mAmp * 0.85 * wC))
+      const lateral = mouthC.clone().sub(p).dot(right)
+      add(deltas.mouthPucker, i, tmp.copy(fwd).multiplyScalar(mAmp * 0.7 * wC))
+      add(deltas.mouthPucker, i, tmp.copy(right).multiplyScalar(lateral * 0.5 * gain * wC))
+    }
+    // mouth shift left/right (whole mouth).
+    {
+      const wM = gauss(p.distanceTo(mouthC), mouthW * 0.7)
+      add(deltas.mouthLeft, i, tmp.copy(right).multiplyScalar(-mAmp * 0.8 * wM))
+      add(deltas.mouthRight, i, tmp.copy(right).multiplyScalar(mAmp * 0.8 * wM))
+    }
+    // upper lip up / lower lip down (per side).
+    radial(deltas.mouthUpperUpLeft, i, p, upLip.clone().addScaledVector(right, -mouthW * 0.25), mouthW * 0.4, up, mAmp * 0.7)
+    radial(deltas.mouthUpperUpRight, i, p, upLip.clone().addScaledVector(right, mouthW * 0.25), mouthW * 0.4, up, mAmp * 0.7)
+    radial(deltas.mouthLowerDownLeft, i, p, loLip.clone().addScaledVector(right, -mouthW * 0.25), mouthW * 0.4, up.clone().negate(), mAmp * 0.7)
+    radial(deltas.mouthLowerDownRight, i, p, loLip.clone().addScaledVector(right, mouthW * 0.25), mouthW * 0.4, up.clone().negate(), mAmp * 0.7)
+    // shrug / roll / press.
+    radial(deltas.mouthShrugUpper, i, p, upLip, mouthW * 0.5, up, mAmp * 0.5)
+    radial(deltas.mouthShrugLower, i, p, loLip, mouthW * 0.5, up, mAmp * 0.5)
+    radial(deltas.mouthRollUpper, i, p, upLip, mouthW * 0.45, dir(tmp, fwd, -1, up, -0.4), mAmp * 0.5)
+    radial(deltas.mouthRollLower, i, p, loLip, mouthW * 0.45, dir(tmp, fwd, -1, up, 0.4), mAmp * 0.5)
+    radial(deltas.mouthPressLeft, i, p, mouthL.clone().addScaledVector(up, -mouthH * 0.1), mouthW * 0.45, up, mAmp * 0.35)
+    radial(deltas.mouthPressRight, i, p, mouthR.clone().addScaledVector(up, -mouthH * 0.1), mouthW * 0.45, up, mAmp * 0.35)
+
+    // ── EYES ────────────────────────────────────────────────────────────────
+    blink(deltas.eyeBlinkLeft, i, p, eyeL, eyeR0, up)
+    blink(deltas.eyeBlinkRight, i, p, eyeR, eyeR0, up)
+    // squint: lower lid up.
+    lowerLid(deltas.eyeSquintLeft, i, p, eyeL, eyeR0, up, eAmp * 0.6)
+    lowerLid(deltas.eyeSquintRight, i, p, eyeR, eyeR0, up, eAmp * 0.6)
+    // wide: upper lid up (open more).
+    upperLid(deltas.eyeWideLeft, i, p, eyeL, eyeR0, up, eAmp * 0.5)
+    upperLid(deltas.eyeWideRight, i, p, eyeR, eyeR0, up, eAmp * 0.5)
+
+    // ── BROWS ───────────────────────────────────────────────────────────────
+    radial(deltas.browInnerUp, i, p, browMid, eyeW * 0.4, up, bAmp * 1.1)
+    radial(deltas.browDownLeft, i, p, browL, eyeW * 0.3, up.clone().negate(), bAmp)
+    radial(deltas.browDownRight, i, p, browR, eyeW * 0.3, up.clone().negate(), bAmp)
+    radial(deltas.browOuterUpLeft, i, p, browL.clone().addScaledVector(right, -eyeW * 0.2), eyeW * 0.28, up, bAmp)
+    radial(deltas.browOuterUpRight, i, p, browR.clone().addScaledVector(right, eyeW * 0.2), eyeW * 0.28, up, bAmp)
+
+    // ── CHEEKS / NOSE / TONGUE ──────────────────────────────────────────────
+    radial(deltas.cheekPuff, i, p, cheekL, mouthW * 0.6, fwd, mAmp * 0.8)
+    radial(deltas.cheekPuff, i, p, cheekR, mouthW * 0.6, fwd, mAmp * 0.8)
+    radial(deltas.cheekSquintLeft, i, p, cheekL, mouthW * 0.5, up, eAmp * 0.5)
+    radial(deltas.cheekSquintRight, i, p, cheekR, mouthW * 0.5, up, eAmp * 0.5)
+    radial(deltas.noseSneerLeft, i, p, nose.clone().addScaledVector(right, -mouthW * 0.2), mouthW * 0.35, up, mAmp * 0.4)
+    radial(deltas.noseSneerRight, i, p, nose.clone().addScaledVector(right, mouthW * 0.2), mouthW * 0.35, up, mAmp * 0.4)
+    // tongueOut: approximate — push a small region just inside the lower lip forward+down.
+    radial(deltas.tongueOut, i, p, loLip.clone().addScaledVector(fwd, -mouthW * 0.1), mouthW * 0.3, dir(tmp, fwd, 1, up, -0.3), mAmp * 0.7)
   }
 
   // Attach as relative morph targets and refresh the mesh.
   geo.morphTargetsRelative = true
   const existing = geo.morphAttributes.position ?? []
-  // Drop any morphs we created before (same names), keep foreign ones.
   const generated = new Set<string>(GENERATED_SHAPES)
   const kept = existing.filter((a) => !generated.has((a as THREE.BufferAttribute).name))
   for (const name of GENERATED_SHAPES) {
@@ -147,50 +217,63 @@ export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks): stri
     kept.push(attr)
   }
   geo.morphAttributes.position = kept
-  mesh.updateMorphTargets() // rebuilds morphTargetDictionary + influences from names
+  mesh.updateMorphTargets()
   return [...GENERATED_SHAPES]
 }
 
-function addDelta(arr: Float32Array, i: number, d: THREE.Vector3): void {
+// ── primitives ────────────────────────────────────────────────────────────────
+
+function add(arr: Float32Array, i: number, d: THREE.Vector3): void {
   arr[i * 3] += d.x
   arr[i * 3 + 1] += d.y
   arr[i * 3 + 2] += d.z
 }
 
-/** Displace vertices near `center` (Gaussian falloff) along a fixed direction. */
-function addRadial(
-  arr: Float32Array,
-  i: number,
-  p: THREE.Vector3,
-  center: THREE.Vector3,
-  sigma: number,
-  dir: THREE.Vector3,
-  amp: number,
-): void {
-  const w = gauss(p.distanceTo(center), sigma)
-  if (w <= 1e-4) return
-  arr[i * 3] += dir.x * amp * w
-  arr[i * 3 + 1] += dir.y * amp * w
-  arr[i * 3 + 2] += dir.z * amp * w
+/** A direction `a*va + b*vb`, normalized, written into `out`. */
+function dir(out: THREE.Vector3, va: THREE.Vector3, a: number, vb: THREE.Vector3, b: number): THREE.Vector3 {
+  return out.copy(va).multiplyScalar(a).addScaledVector(vb, b).normalize()
 }
 
-/** Pull only the UPPER-lid vertices (those above the eye center) down to close. */
-function addBlink(
-  arr: Float32Array,
-  i: number,
-  p: THREE.Vector3,
-  eye: THREE.Vector3,
-  sigma: number,
-  up: THREE.Vector3,
-): void {
-  const above = p.clone().sub(eye).dot(up) // >0 above eye center
-  if (above <= 0) return
-  const w = gauss(p.distanceTo(eye), sigma) * clamp01(above / sigma)
+function radial(arr: Float32Array, i: number, p: THREE.Vector3, center: THREE.Vector3, sigma: number, d: THREE.Vector3, amp: number): void {
+  const w = gauss(p.distanceTo(center), sigma)
   if (w <= 1e-4) return
-  const drop = Math.min(above, sigma) * w
+  arr[i * 3] += d.x * amp * w
+  arr[i * 3 + 1] += d.y * amp * w
+  arr[i * 3 + 2] += d.z * amp * w
+}
+
+/** Close the eye: the UPPER lid drops to the eye center. */
+function blink(arr: Float32Array, i: number, p: THREE.Vector3, eye: THREE.Vector3, r: number, up: THREE.Vector3): void {
+  const above = p.clone().sub(eye).dot(up) // >0 above eye center
+  if (above <= -r * 0.2) return
+  const w = gauss(p.distanceTo(eye), r * 1.5) * clamp01((above + r * 0.2) / (r * 1.2))
+  if (w <= 1e-4) return
+  const drop = (Math.max(0, above) + r * 0.5) * w
   arr[i * 3] -= up.x * drop
   arr[i * 3 + 1] -= up.y * drop
   arr[i * 3 + 2] -= up.z * drop
+}
+
+/** Raise the lower lid (squint). */
+function lowerLid(arr: Float32Array, i: number, p: THREE.Vector3, eye: THREE.Vector3, r: number, up: THREE.Vector3, amp: number): void {
+  const below = eye.clone().sub(p).dot(up)
+  if (below <= 0) return
+  const w = gauss(p.distanceTo(eye), r * 1.2) * clamp01(below / r)
+  radialDir(arr, i, up, amp * w)
+}
+
+/** Raise the upper lid (eye wide). */
+function upperLid(arr: Float32Array, i: number, p: THREE.Vector3, eye: THREE.Vector3, r: number, up: THREE.Vector3, amp: number): void {
+  const above = p.clone().sub(eye).dot(up)
+  if (above <= 0) return
+  const w = gauss(p.distanceTo(eye), r * 1.2) * clamp01(above / r)
+  radialDir(arr, i, up, amp * w)
+}
+
+function radialDir(arr: Float32Array, i: number, d: THREE.Vector3, s: number): void {
+  arr[i * 3] += d.x * s
+  arr[i * 3 + 1] += d.y * s
+  arr[i * 3 + 2] += d.z * s
 }
 
 function meshCentroid(pos: THREE.BufferAttribute): THREE.Vector3 {
@@ -201,12 +284,8 @@ function meshCentroid(pos: THREE.BufferAttribute): THREE.Vector3 {
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
-// Landmarks (not the heavy morphs) are saved per model URL, so a generated model
-// keeps its facial rig across reloads and in the OBS view. Uploaded blob: URLs
-// change each session, so for those the rig lasts only the session.
 
-const STORE_KEY = 'gr3d.faceRig.v1'
-
+const STORE_KEY = 'gr3d.faceRig.v2'
 type RigStore = Record<string, FaceLandmarks>
 
 function readStore(): RigStore {
@@ -217,10 +296,9 @@ function readStore(): RigStore {
   }
 }
 
-/** A stable key for a model URL (strips volatile query strings / blob noise). */
 export function rigKey(url: string): string {
   if (!url) return ''
-  if (url.startsWith('blob:')) return url // session-only, still de-dupes within a session
+  if (url.startsWith('blob:')) return url
   return url.split('?')[0]
 }
 
@@ -232,14 +310,17 @@ export function saveLandmarks(url: string, lm: FaceLandmarks): void {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(store))
   } catch {
-    /* storage full / unavailable — rig still applies this session */
+    /* storage full — rig still applies this session */
   }
 }
 
 export function loadLandmarks(url: string): FaceLandmarks | null {
   const key = rigKey(url)
   if (!key) return null
-  return readStore()[key] ?? null
+  const lm = readStore()[key]
+  // Require the v2 fields (upper/lower lip) to apply automatically.
+  if (lm && lm.upperLip && lm.lowerLip) return lm
+  return null
 }
 
 export function clearLandmarks(url: string): void {

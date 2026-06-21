@@ -50,8 +50,9 @@ export interface AvatarCanvasHandle {
   setMarkers: (points: { local: [number, number, number]; color?: number }[]) => void
   /** Heuristic landmark guess from the face mesh bounds (a starting point). */
   guessLandmarks: () => FaceLandmarks | null
-  /** Build ARKit morphs on the face mesh from landmarks. Throws if no mesh. */
-  buildFaceRig: (lm: FaceLandmarks) => string[]
+  /** Build ARKit morphs on the face mesh from landmarks. `gain` = strength.
+   * Throws if no mesh. */
+  buildFaceRig: (lm: FaceLandmarks, gain?: number) => string[]
   /** Whether a riggable mesh (with vertices) is loaded. */
   hasRiggableMesh: () => boolean
   /** Whether the loaded mesh already exposes ARKit-named morphs. */
@@ -170,18 +171,21 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       const zf = bb.max.z // assume +Z é a frente do rosto (o usuário ajusta se não for)
       const Y = (f: number) => bb.min.y + hh * f
       return {
-        eyeLeft: [cx - w * 0.18, Y(0.62), zf],
-        eyeRight: [cx + w * 0.18, Y(0.62), zf],
-        mouthLeft: [cx - w * 0.1, Y(0.42), zf],
-        mouthRight: [cx + w * 0.1, Y(0.42), zf],
-        jaw: [cx, Y(0.24), zf],
+        eyeLeft: [cx - w * 0.18, Y(0.66), zf],
+        eyeRight: [cx + w * 0.18, Y(0.66), zf],
+        mouthLeft: [cx - w * 0.11, Y(0.4), zf],
+        mouthRight: [cx + w * 0.11, Y(0.4), zf],
+        upperLip: [cx, Y(0.44), zf],
+        lowerLip: [cx, Y(0.36), zf],
+        browLeft: [cx - w * 0.18, Y(0.74), zf],
+        browRight: [cx + w * 0.18, Y(0.74), zf],
+        jaw: [cx, Y(0.22), zf],
       }
     },
-    buildFaceRig: (lm) => {
+    buildFaceRig: (lm, gain) => {
       const mesh = faceMeshRef.current
       if (!mesh) throw new Error('Nenhuma malha de rosto carregada.')
-      const names = buildProceduralMorphs(mesh, lm)
-      return names
+      return buildProceduralMorphs(mesh, lm, gain ?? 1.5)
     },
     hasRiggableMesh: () => Boolean(faceMeshRef.current),
     hasArkitMorphs: () => (rootRef.current ? meshHasArkitMorphs(rootRef.current) : false),

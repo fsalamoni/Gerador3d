@@ -34,10 +34,14 @@ const STEPS: StepDef[] = [
   { key: 'eyeRight', label: 'Olho direito', hint: 'Clique no centro do olho à DIREITA do personagem.', color: 0x60a5fa },
   { key: 'mouthLeft', label: 'Canto esquerdo da boca', hint: 'Clique no canto ESQUERDO da boca.', color: 0xf472b6 },
   { key: 'mouthRight', label: 'Canto direito da boca', hint: 'Clique no canto DIREITO da boca.', color: 0xf472b6 },
-  { key: 'jaw', label: 'Queixo (opcional)', hint: 'Clique na ponta do queixo — melhora o "abrir a boca".', optional: true, color: 0xfbbf24 },
+  { key: 'upperLip', label: 'Lábio superior (centro)', hint: 'Clique no MEIO do lábio de cima — essencial p/ abrir a boca.', color: 0xfb7185 },
+  { key: 'lowerLip', label: 'Lábio inferior (centro)', hint: 'Clique no MEIO do lábio de baixo.', color: 0xfb7185 },
+  { key: 'browLeft', label: 'Sobrancelha esq. (opcional)', hint: 'Clique no centro da sobrancelha esquerda.', optional: true, color: 0xa78bfa },
+  { key: 'browRight', label: 'Sobrancelha dir. (opcional)', hint: 'Clique no centro da sobrancelha direita.', optional: true, color: 0xa78bfa },
+  { key: 'jaw', label: 'Queixo (opcional)', hint: 'Clique na ponta do queixo — reforça o "abrir a boca".', optional: true, color: 0xfbbf24 },
 ]
 
-const REQUIRED: LandmarkKey[] = ['eyeLeft', 'eyeRight', 'mouthLeft', 'mouthRight']
+const REQUIRED: LandmarkKey[] = ['eyeLeft', 'eyeRight', 'mouthLeft', 'mouthRight', 'upperLip', 'lowerLip']
 const AVATAR_META = { title: 'Gerador3D Avatar', author: 'Gerador3D' }
 const colorOf = (k: LandmarkKey) => STEPS.find((s) => s.key === k)!.color
 
@@ -73,6 +77,7 @@ export default function FaceRigPanel({
   const [busy, setBusy] = useState<'' | 'vrm' | 'glb' | 'save'>('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [gain, setGain] = useState(1.5)
 
   const ready = REQUIRED.every((k) => marks[k])
 
@@ -126,7 +131,7 @@ export default function FaceRigPanel({
     setError(null)
   }, [avatar])
 
-  const build = useCallback(() => {
+  const buildWith = useCallback((g: number) => {
     const a = avatar.current
     if (!a || !ready) return
     setError(null)
@@ -136,9 +141,13 @@ export default function FaceRigPanel({
         eyeRight: marks.eyeRight!,
         mouthLeft: marks.mouthLeft!,
         mouthRight: marks.mouthRight!,
+        upperLip: marks.upperLip!,
+        lowerLip: marks.lowerLip!,
+        ...(marks.browLeft ? { browLeft: marks.browLeft } : {}),
+        ...(marks.browRight ? { browRight: marks.browRight } : {}),
         ...(marks.jaw ? { jaw: marks.jaw } : {}),
       }
-      a.buildFaceRig(lm)
+      a.buildFaceRig(lm, g)
       saveLandmarks(modelUrl, lm)
       setBuilt(true)
       setDirty(false)
@@ -148,6 +157,8 @@ export default function FaceRigPanel({
       setError(e instanceof Error ? e.message : 'Falha ao gerar as expressões.')
     }
   }, [avatar, ready, marks, modelUrl, onBuilt])
+
+  const build = useCallback(() => buildWith(gain), [buildWith, gain])
 
   const preview = useCallback(
     (name: string, value: number) => avatar.current?.previewMorph(name, value),
@@ -274,15 +285,41 @@ export default function FaceRigPanel({
       {built && (
         <div className="mt-4 border-t border-white/10 pt-3">
           <p className="rounded-lg bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-300">
-            Expressões ativas! Teste abaixo; inicie a câmera para animar com seu rosto.
+            44 expressões ativas! Teste abaixo; inicie a câmera para animar com seu rosto.
           </p>
 
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Intensidade das expressões</span>
+              <span className="text-slate-200">{gain.toFixed(1)}×</span>
+            </div>
+            <input
+              type="range"
+              min={0.6}
+              max={3}
+              step={0.1}
+              value={gain}
+              onChange={(e) => {
+                const g = Number(e.target.value)
+                setGain(g)
+                buildWith(g)
+              }}
+              className="w-full accent-brand-500"
+            />
+            <p className="text-[10px] text-slate-500">Aumente se as expressões ficarem fracas/sutis.</p>
+          </div>
+
           <p className="mt-3 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Testar (segure)</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <TestBtn label="Abrir boca" onDown={() => preview('jawOpen', 1)} onUp={() => preview('jawOpen', 0)} />
             <TestBtn label="Sorrir" onDown={() => { preview('mouthSmileLeft', 1); preview('mouthSmileRight', 1) }} onUp={() => { preview('mouthSmileLeft', 0); preview('mouthSmileRight', 0) }} />
+            <TestBtn label="Franzir" onDown={() => { preview('mouthFrownLeft', 1); preview('mouthFrownRight', 1) }} onUp={() => { preview('mouthFrownLeft', 0); preview('mouthFrownRight', 0) }} />
             <TestBtn label="Piscar" onDown={() => { preview('eyeBlinkLeft', 1); preview('eyeBlinkRight', 1) }} onUp={() => { preview('eyeBlinkLeft', 0); preview('eyeBlinkRight', 0) }} />
             <TestBtn label="Bico (ou)" onDown={() => preview('mouthPucker', 1)} onUp={() => preview('mouthPucker', 0)} />
+            <TestBtn label='"Ô" (oh)' onDown={() => preview('mouthFunnel', 1)} onUp={() => preview('mouthFunnel', 0)} />
+            <TestBtn label="Sobrancelha" onDown={() => { preview('browInnerUp', 1); preview('browOuterUpLeft', 1); preview('browOuterUpRight', 1) }} onUp={() => { preview('browInnerUp', 0); preview('browOuterUpLeft', 0); preview('browOuterUpRight', 0) }} />
+            <TestBtn label="Queixo p/ lado" onDown={() => preview('jawLeft', 1)} onUp={() => preview('jawLeft', 0)} />
+            <TestBtn label="Língua" onDown={() => preview('tongueOut', 1)} onUp={() => preview('tongueOut', 0)} />
           </div>
 
           <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Exportar avatar (com expressões)</p>

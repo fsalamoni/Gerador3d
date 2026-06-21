@@ -123,16 +123,22 @@ export interface VrmMeta {
   author?: string
 }
 
-/** ARKit morph name → VRM0 blendShapeGroup (presetName + the morphs it blends). */
+/** ARKit morph name → VRM0 blendShapeGroup (presetName + the morphs it blends).
+ * Covers speech visemes (A/I/U/E/O), blink and the four VRM emotions, so the
+ * exported avatar lip-syncs and emotes in VSeeFace / VTube Studio. */
 const VRM_GROUPS: { name: string; preset: string; morphs: string[] }[] = [
   { name: 'A', preset: 'a', morphs: ['jawOpen'] },
-  { name: 'O', preset: 'o', morphs: ['mouthFunnel'] },
+  { name: 'I', preset: 'i', morphs: ['mouthStretchLeft', 'mouthStretchRight'] },
   { name: 'U', preset: 'u', morphs: ['mouthPucker'] },
+  { name: 'E', preset: 'e', morphs: ['mouthStretchLeft', 'mouthStretchRight', 'jawOpen'] },
+  { name: 'O', preset: 'o', morphs: ['mouthFunnel'] },
   { name: 'Blink', preset: 'blink', morphs: ['eyeBlinkLeft', 'eyeBlinkRight'] },
   { name: 'Blink_L', preset: 'blink_l', morphs: ['eyeBlinkLeft'] },
   { name: 'Blink_R', preset: 'blink_r', morphs: ['eyeBlinkRight'] },
-  { name: 'Joy', preset: 'joy', morphs: ['mouthSmileLeft', 'mouthSmileRight'] },
-  { name: 'Fun', preset: 'fun', morphs: ['mouthSmileLeft', 'mouthSmileRight'] },
+  { name: 'Joy', preset: 'joy', morphs: ['mouthSmileLeft', 'mouthSmileRight', 'cheekSquintLeft', 'cheekSquintRight'] },
+  { name: 'Angry', preset: 'angry', morphs: ['browDownLeft', 'browDownRight', 'mouthFrownLeft', 'mouthFrownRight', 'noseSneerLeft', 'noseSneerRight'] },
+  { name: 'Sorrow', preset: 'sorrow', morphs: ['mouthFrownLeft', 'mouthFrownRight', 'browInnerUp'] },
+  { name: 'Fun', preset: 'fun', morphs: ['mouthSmileLeft', 'mouthSmileRight', 'browOuterUpLeft', 'browOuterUpRight'] },
   { name: 'Neutral', preset: 'neutral', morphs: [] },
 ]
 

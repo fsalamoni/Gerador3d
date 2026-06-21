@@ -176,6 +176,9 @@ def run_generate(store: Store, job):
 
     store.update(jid, status="in_progress", progress=5)
     try:
+        # Auto-reparo do ambiente de geração (transformers/hf_hub/numpy), caso
+        # tenha sido instalado por uma versão antiga e ficado inconsistente.
+        ensure_generation_env(store.dir)
         have_img = _decode_data_url(img, image_path)
         # Imagens extras (ângulos) para backends multi-view. A 1ª (frontal) é a
         # principal usada pelos backends de imagem única (TripoSR/Hunyuan-mini).
@@ -344,6 +347,8 @@ PROVISION = {"active": False, "target": None, "progress": 0,
              "done": False, "ok": False, "error": None, "log": []}
 _PLOCK = threading.Lock()
 _CUDA_CACHE = {"checked": False, "value": None}
+_DEPS_HEALED = {"done": False}
+_HEAL_LOCK = threading.Lock()
 
 TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/main.zip"
 HUNYUAN_ZIP = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
@@ -415,6 +420,57 @@ def _selftest_imports(py, extra_paths=()):
         "print('[selftest] transformers/mcubes/rembg/trimesh OK; numpy', numpy.__version__)"
     )
     _run([py, "-c", code])
+
+
+def _deps_chain_ok(py) -> bool:
+    """True se a cadeia crítica de imports funciona (transformers↔hf_hub↔numpy)."""
+    code = "from transformers.generation import utils; import huggingface_hub, numpy"
+    try:
+        r = subprocess.run([py, "-c", code], capture_output=True, timeout=180)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def ensure_generation_env(data_dir: Path, force=False):
+    """AUTO-REPARO: se o torch está instalado mas a cadeia de imports está
+    quebrada (transformers↔huggingface_hub↔numpy incompatíveis — o erro
+    'split_torch_state_dict_into_shards' / 'q_proj'), reinstala o conjunto
+    TRAVADO sem o usuário precisar fazer nada. Roda uma vez por processo.
+
+    Isto torna a correção independente de clicar em 'Instalar Geração 3D': o app
+    conserta o ambiente sozinho ao iniciar e antes da 1ª geração."""
+    if _DEPS_HEALED["done"] and not force:
+        return
+    with _HEAL_LOCK:
+        if _DEPS_HEALED["done"] and not force:
+            return
+        py = sys.executable
+        if importlib.util.find_spec("torch") is None:
+            return  # geração ainda não instalada — a UI orienta a instalar
+        if _deps_chain_ok(py):
+            _DEPS_HEALED["done"] = True
+            return
+        try:
+            _plog("Reparando dependências de geração (transformers/huggingface_hub/numpy)...")
+            cons = _write_constraints(data_dir)
+            _run([py, "-m", "pip", "install", "--no-warn-script-location", "-c", str(cons),
+                  "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
+                  "numpy<2", "safetensors"])
+            # Remove módulos possivelmente meio-importados para que o re-import
+            # pegue as versões consertadas no mesmo processo.
+            for m in list(sys.modules):
+                root = m.split(".")[0]
+                if root in ("transformers", "huggingface_hub", "tokenizers"):
+                    sys.modules.pop(m, None)
+            _CUDA_CACHE["checked"] = False
+            _CUDA_CACHE["gpu_checked"] = False
+            _DEPS_HEALED["done"] = _deps_chain_ok(py)
+            _plog("Dependências de geração reparadas com sucesso."
+                  if _DEPS_HEALED["done"] else
+                  "Reparo parcial — rode 'Instalar Geração 3D' na Configuração.")
+        except Exception as e:  # noqa: BLE001
+            _plog(f"Falha ao reparar dependências: {e}")
 
 
 def provision_generation(data_dir: Path):
@@ -793,6 +849,11 @@ def create_app(data_dir: Path) -> FastAPI:
 
     def spawn(fn, *args):
         threading.Thread(target=fn, args=args, daemon=True).start()
+
+    # Auto-reparo proativo: se a geração já foi instalada mas o ambiente está
+    # quebrado, conserta em segundo plano assim que o app sobe — antes mesmo de o
+    # usuário clicar em Gerar.
+    spawn(ensure_generation_env, data_dir)
 
     @app.get("/api/local/health")
     def health():
