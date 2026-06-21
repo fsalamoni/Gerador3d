@@ -23,6 +23,8 @@ export interface StartGenerationInput {
   prompt?: string
   /** Data URL of the source image for image→3D. */
   imageDataUrl?: string
+  /** Extra angle images (multi-view): [frontal, traseira, esquerda, direita]. */
+  imageDataUrls?: string[]
   /** Extra provider-specific params. */
   extra?: Record<string, unknown>
 }
@@ -62,6 +64,7 @@ export async function startGeneration(input: StartGenerationInput): Promise<stri
       task: input.task,
       prompt: input.prompt,
       imageDataUrl: input.imageDataUrl,
+      imageDataUrls: input.imageDataUrls,
       mcResolution: typeof extra.mcResolution === 'number' ? extra.mcResolution : undefined,
       seed: typeof extra.seed === 'number' ? extra.seed : undefined,
       backend: typeof extra.backend === 'string' ? extra.backend : undefined,

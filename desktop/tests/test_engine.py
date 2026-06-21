@@ -165,6 +165,26 @@ check("falha de runtime cai p/ TripoSR", store.get(j["id"])["status"] == "succee
 check("falha de runtime preserva backend escolhido",
       client.get("/api/local/config").json()["backend"] == "hunyuan-mini")
 
+# multi-imagem: imagens extras (ângulos) chegam ao backend em params['imagePaths']
+ls.set_backend(data, "triposr")
+seen_mv = {}
+def gen_mv(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
+    seen_mv["params"] = params or {}
+    Path(out_path).write_bytes(b"GLB" * 10)
+with mock.patch.object(ls.genbackends, "generate", side_effect=gen_mv):
+    j = ls.new_job("image_to_3d", prompt="x")
+    j["params"]["_imageDataUrl"] = IMG
+    j["params"]["_imageDataUrls"] = [IMG, IMG]  # 2 ângulos extras
+    j["params"]["_backend"] = "triposr"
+    store.put(j); ls.run_generate(store, j)
+check("multi-imagem: frontal + 2 extras chegam como imagePaths",
+      len(seen_mv.get("params", {}).get("imagePaths", [])) == 3)
+
+# hunyuan-mini-mv está no catálogo e no dispatcher
+check("backend multi-view registrado",
+      "hunyuan-mini-mv" in ls.genbackends._BACKENDS
+      and ls.genbackends.BACKEND_CATALOG.get("hunyuan-mini-mv", {}).get("multiview") is True)
+
 # regressão: rigging aceita GLB de fallback quando não há .vrm
 class GlbFallbackPopen:
     def __init__(self, cmd, **k):

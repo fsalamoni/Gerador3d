@@ -100,6 +100,15 @@ BACKEND_CATALOG = {
         "installable": True,
         "note": "Geometria de altíssima fidelidade. Textura PBR opcional (avançada).",
     },
+    "hunyuan-mini-mv": {
+        "label": "Hunyuan3D-2mv (multi-imagem)",
+        "minVramGb": 12,
+        "texture": False,
+        "installable": True,
+        "multiview": True,
+        "note": "Usa várias fotos (frente/costas/lados) para maior fidelidade. "
+                "Instala junto com o Hunyuan; o modelo baixa no 1º uso.",
+    },
     "trellis": {
         "label": "TRELLIS",
         "minVramGb": 16,
@@ -374,7 +383,15 @@ def _run_hunyuan(cache_key, default_model, default_subfolder, task, prompt,
     steps = int(params.get("steps") or os.environ.get("HUNYUAN_STEPS", "30"))
     octree = int(params.get("octreeResolution") or params.get("mcResolution")
                  or os.environ.get("HUNYUAN_OCTREE", "256"))
-    call_kwargs = dict(image=image_path, num_inference_steps=steps,
+    # Multi-view: o modelo Hunyuan3D-2mv aceita um dict de vistas. As imagens
+    # extras chegam em params["imagePaths"] na ordem [frontal, traseira, esq, dir].
+    views = params.get("imagePaths") or []
+    if cache_key.endswith("-mv") and len(views) > 1:
+        names = ["front", "back", "left", "right"]
+        image_arg = {names[i]: views[i] for i in range(min(len(views), 4))}
+    else:
+        image_arg = image_path
+    call_kwargs = dict(image=image_arg, num_inference_steps=steps,
                        octree_resolution=octree, output_type="trimesh")
     seed = params.get("seed")
     if seed is not None:
@@ -421,11 +438,21 @@ def _hunyuan_mini(task, prompt, image_path, out_path, progress, params=None):
                  task, prompt, image_path, out_path, progress, params)
 
 
+def _hunyuan_mini_mv(task, prompt, image_path, out_path, progress, params=None):
+    # Hunyuan3D-2mv (multi-view): usa várias vistas (frente/costas/lados) p/ maior
+    # fidelidade. O cache_key terminando em "-mv" ativa o caminho de dict de vistas.
+    _run_hunyuan("hunyuan-mini-mv",
+                 os.environ.get("HUNYUAN_MV_MODEL", "tencent/Hunyuan3D-2mv"),
+                 os.environ.get("HUNYUAN_MV_SUBFOLDER", "hunyuan3d-dit-v2-mv"),
+                 task, prompt, image_path, out_path, progress, params)
+
+
 _BACKENDS = {
     "triposr": _triposr,
     "trellis": _trellis,
     "hunyuan": _hunyuan,
     "hunyuan-mini": _hunyuan_mini,
+    "hunyuan-mini-mv": _hunyuan_mini_mv,
 }
 
 

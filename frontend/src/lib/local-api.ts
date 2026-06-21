@@ -18,6 +18,7 @@ export async function localGenerate(input: {
   task: TaskKey
   prompt?: string
   imageDataUrl?: string
+  imageDataUrls?: string[]
   mcResolution?: number
   seed?: number
   backend?: string
@@ -29,6 +30,7 @@ export async function localGenerate(input: {
       task: input.task,
       prompt: input.prompt ?? '',
       imageDataUrl: input.imageDataUrl ?? '',
+      imageDataUrls: input.imageDataUrls ?? [],
       mcResolution: input.mcResolution ?? 0,
       seed: input.seed ?? -1,
       backend: input.backend ?? '',
@@ -87,6 +89,8 @@ export interface BackendInfo {
   texture: boolean
   /** Whether the app can one-click install it (vs. manual/Linux setup). */
   installable?: boolean
+  /** Uses multiple input images (front/back/sides) for higher fidelity. */
+  multiview?: boolean
   note: string
 }
 

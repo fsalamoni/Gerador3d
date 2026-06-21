@@ -170,17 +170,27 @@ def run_generate(store: Store, job):
     task = job["params"]["taskKey"]
     prompt = job["params"].get("prompt", "")
     img = job["params"].pop("_imageDataUrl", "")
+    extra_imgs = job["params"].pop("_imageDataUrls", []) or []
     gen_params = job["params"].pop("_genParams", {}) or {}
     backend = job["params"].pop("_backend", "") or current_backend(store.dir)
 
     store.update(jid, status="in_progress", progress=5)
     try:
         have_img = _decode_data_url(img, image_path)
+        # Imagens extras (ângulos) para backends multi-view. A 1ª (frontal) é a
+        # principal usada pelos backends de imagem única (TripoSR/Hunyuan-mini).
+        image_paths = [str(image_path)] if have_img else []
+        for i, durl in enumerate(extra_imgs):
+            p = job_dir / f"input_{i + 1}.png"
+            if _decode_data_url(durl, p):
+                image_paths.append(str(p))
         if task == "image_to_3d" and not have_img:
             raise ValueError("image_to_3d requer uma imagem.")
         if task == "text_to_3d" and not prompt.strip():
             raise ValueError("text_to_3d requer um prompt.")
         prog = lambda p, _m="": store.update(jid, progress=max(5, min(95, int(p))))
+        if len(image_paths) > 1:
+            gen_params = {**gen_params, "imagePaths": image_paths}  # multi-view
         gen_kwargs = dict(
             task=task, prompt=prompt,
             image_path=str(image_path) if have_img else "", out_path=str(out),
@@ -215,8 +225,9 @@ def run_generate(store: Store, job):
         store.update(jid, status="failed", error=str(e)[:500])
     finally:
         try:
-            if image_path.exists():
-                image_path.unlink()
+            for p in [image_path, *[job_dir / f"input_{i + 1}.png" for i in range(len(extra_imgs))]]:
+                if p.exists():
+                    p.unlink()
         except Exception:
             pass
 
@@ -732,6 +743,7 @@ class GenBody(BaseModel):
     task: str
     prompt: str = ""
     imageDataUrl: str = ""
+    imageDataUrls: list[str] = []  # ângulos extras (multi-view); a 1ª é a frontal
     backend: str = ""          # vazio = backend padrão (config/env)
     mcResolution: int = 0      # 0 = padrão; qualidade da malha (256/384/512)
     foregroundRatio: float = 0.0
@@ -823,6 +835,7 @@ def create_app(data_dir: Path) -> FastAPI:
         if body.seed is not None and body.seed >= 0:
             params["seed"] = int(body.seed)
         job["params"]["_imageDataUrl"] = body.imageDataUrl  # transiente
+        job["params"]["_imageDataUrls"] = body.imageDataUrls or []  # ângulos extras
         job["params"]["_genParams"] = params
         job["params"]["_backend"] = body.backend or current_backend(data_dir)
         store.put(job)

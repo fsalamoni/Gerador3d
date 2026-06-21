@@ -46,6 +46,10 @@ export interface AvatarCanvasHandle {
   cancelPick: () => void
   addMarker: (world: [number, number, number], color?: number) => void
   clearMarkers: () => void
+  /** Redraw all markers from mesh-local positions (used to edit landmarks). */
+  setMarkers: (points: { local: [number, number, number]; color?: number }[]) => void
+  /** Heuristic landmark guess from the face mesh bounds (a starting point). */
+  guessLandmarks: () => FaceLandmarks | null
   /** Build ARKit morphs on the face mesh from landmarks. Throws if no mesh. */
   buildFaceRig: (lm: FaceLandmarks) => string[]
   /** Whether a riggable mesh (with vertices) is loaded. */
@@ -129,18 +133,49 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     addMarker: (world, color = 0x34d399) => {
       const group = markersRef.current
       if (!group) return
-      const s = new THREE.Mesh(
-        new THREE.SphereGeometry(markerRadius(rootRef.current), 16, 16),
-        new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }),
-      )
-      s.renderOrder = 999
-      s.position.set(world[0], world[1], world[2])
-      group.add(s)
+      group.add(makeMarker(world, color, markerRadius(rootRef.current)))
     },
     clearMarkers: () => {
       const group = markersRef.current
       if (!group) return
       for (const c of [...group.children]) group.remove(c)
+    },
+    setMarkers: (points) => {
+      const group = markersRef.current
+      const mesh = faceMeshRef.current
+      if (!group) return
+      for (const c of [...group.children]) group.remove(c)
+      if (!mesh) return
+      mesh.updateWorldMatrix(true, false)
+      const r = markerRadius(rootRef.current)
+      const v = new THREE.Vector3()
+      for (const p of points) {
+        v.set(p.local[0], p.local[1], p.local[2])
+        mesh.localToWorld(v)
+        group.add(makeMarker([v.x, v.y, v.z], p.color ?? 0x34d399, r))
+      }
+    },
+    guessLandmarks: () => {
+      const mesh = faceMeshRef.current
+      if (!mesh) return null
+      const geo = mesh.geometry as THREE.BufferGeometry
+      geo.computeBoundingBox()
+      const bb = geo.boundingBox
+      if (!bb) return null
+      const size = new THREE.Vector3()
+      bb.getSize(size)
+      const w = size.x || 1
+      const hh = size.y || 1
+      const cx = (bb.min.x + bb.max.x) / 2
+      const zf = bb.max.z // assume +Z é a frente do rosto (o usuário ajusta se não for)
+      const Y = (f: number) => bb.min.y + hh * f
+      return {
+        eyeLeft: [cx - w * 0.18, Y(0.62), zf],
+        eyeRight: [cx + w * 0.18, Y(0.62), zf],
+        mouthLeft: [cx - w * 0.1, Y(0.42), zf],
+        mouthRight: [cx + w * 0.1, Y(0.42), zf],
+        jaw: [cx, Y(0.24), zf],
+      }
     },
     buildFaceRig: (lm) => {
       const mesh = faceMeshRef.current
@@ -432,6 +467,16 @@ function markerRadius(root: THREE.Object3D | null): number {
   if (!root) return 0.02
   const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3())
   return Math.max(0.008, Math.max(size.x, size.y, size.z) * 0.02)
+}
+
+function makeMarker(world: [number, number, number], color: number, r: number): THREE.Mesh {
+  const s = new THREE.Mesh(
+    new THREE.SphereGeometry(r, 16, 16),
+    new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }),
+  )
+  s.renderOrder = 999
+  s.position.set(world[0], world[1], world[2])
+  return s
 }
 
 function buildProceduralHead(): {

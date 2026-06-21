@@ -24,6 +24,9 @@ export default function GeneratePage() {
   const [mode, setMode] = useState<Mode>('text')
   const [prompt, setPrompt] = useState('')
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+  // Optional extra angle images (multi-view): [back, left, right].
+  const [extraImages, setExtraImages] = useState<(string | null)[]>([null, null, null])
+  const [pendingSlot, setPendingSlot] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [activeJob, setActiveJob] = useState<GenerationJob | null>(null)
   const [modelId, setModelId] = useState<string>('')
@@ -70,12 +73,26 @@ export default function GeneratePage() {
   useJobPolling(activeJob ? [activeJob] : [])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const extraInputRef = useRef<HTMLInputElement>(null)
 
   function onPickImage(file: File) {
     const reader = new FileReader()
     reader.onload = () => setImageDataUrl(String(reader.result))
     reader.readAsDataURL(file)
   }
+
+  function onPickExtra(slot: number, file: File) {
+    const reader = new FileReader()
+    reader.onload = () =>
+      setExtraImages((prev) => {
+        const next = [...prev]
+        next[slot] = String(reader.result)
+        return next
+      })
+    reader.readAsDataURL(file)
+  }
+
+  const EXTRA_LABELS = ['Costas', 'Lado esq.', 'Lado dir.']
 
   async function handleGenerate() {
     if (!IS_LOCAL && !model) return // cloud needs a catalog model; local doesn't
@@ -85,6 +102,10 @@ export default function GeneratePage() {
         task,
         prompt: mode === 'text' ? prompt : undefined,
         imageDataUrl: mode === 'image' ? imageDataUrl ?? undefined : undefined,
+        imageDataUrls:
+          mode === 'image'
+            ? extraImages.filter((x): x is string => Boolean(x))
+            : undefined,
         extra: IS_LOCAL ? { mcResolution: quality } : undefined,
       })
       setActiveJob({
@@ -196,6 +217,46 @@ export default function GeneratePage() {
                   if (file) onPickImage(file)
                 }}
               />
+
+              {/* Optional extra angles (multi-view) */}
+              {imageDataUrl && (
+                <div className="mt-3">
+                  <p className="mb-1.5 text-[11px] text-slate-500">
+                    Opcional: ângulos extras (melhora a fidelidade no modelo multi-imagem).
+                    Uma boa imagem frontal já gera um 3D fiel.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {EXTRA_LABELS.map((label, i) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => { setPendingSlot(i); extraInputRef.current?.click() }}
+                        className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-white/15 bg-slate-800/40 p-1 text-[10px] text-slate-400 transition hover:border-brand-500/50"
+                      >
+                        {extraImages[i] ? (
+                          <img src={extraImages[i] as string} alt={label} className="h-full w-full rounded object-contain" />
+                        ) : (
+                          <>
+                            <Upload className="h-4 w-4" />
+                            <span>{label}</span>
+                          </>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    ref={extraInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file && pendingSlot !== null) onPickExtra(pendingSlot, file)
+                      e.target.value = ''
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
 

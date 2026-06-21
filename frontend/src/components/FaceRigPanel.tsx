@@ -1,14 +1,18 @@
 /**
- * FaceRigPanel — guided facial-rig flow for the live studio.
+ * FaceRigPanel — guided, EDITABLE facial-rig flow for the live studio.
  *
- * The user orbits the model in the viewport and clicks a few facial points
- * (eyes, mouth corners, optional jaw). From those we synthesize ARKit
- * blendshapes ({@link buildProceduralMorphs}) so the webcam can drive mouth,
- * smile, jaw and blink — even on creatures and template-less generated meshes.
- * Landmarks are saved per model so the rig persists on reload and in OBS.
+ * The user marks a few facial points (eyes, mouth corners, optional jaw) on the
+ * model; we synthesize ARKit blendshapes ({@link buildProceduralMorphs}) so the
+ * webcam drives mouth/smile/jaw/blink — on humans AND creatures. Then they can
+ * export a .vrm/.glb with those expressions baked in.
+ *
+ * Designed to avoid wasted work:
+ *  - "Estimar automaticamente" pre-places all points from the mesh bounds.
+ *  - ANY point can be re-marked individually by clicking it — no full restart.
+ *  - "Atualizar expressões" rebuilds after a correction.
  */
 import { useCallback, useEffect, useState, type RefObject } from 'react'
-import { ScanFace, RotateCcw, Sparkles, Check, X, Download, Save } from 'lucide-react'
+import { ScanFace, RotateCcw, Sparkles, Check, X, Download, Save, Wand2, Pencil } from 'lucide-react'
 import type { AvatarCanvasHandle } from './AvatarCanvas'
 import {
   saveLandmarks,
@@ -16,18 +20,6 @@ import {
   type LandmarkKey,
 } from '../lib/procedural-face-rig'
 import { upload3DModel } from '../lib/upload-service'
-
-function downloadBytes(buf: ArrayBuffer, filename: string): void {
-  const blob = new Blob([buf], { type: 'model/gltf-binary' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 2000)
-}
 
 interface StepDef {
   key: LandmarkKey
@@ -42,13 +34,26 @@ const STEPS: StepDef[] = [
   { key: 'eyeRight', label: 'Olho direito', hint: 'Clique no centro do olho à DIREITA do personagem.', color: 0x60a5fa },
   { key: 'mouthLeft', label: 'Canto esquerdo da boca', hint: 'Clique no canto ESQUERDO da boca.', color: 0xf472b6 },
   { key: 'mouthRight', label: 'Canto direito da boca', hint: 'Clique no canto DIREITO da boca.', color: 0xf472b6 },
-  { key: 'jaw', label: 'Queixo (opcional)', hint: 'Clique na ponta do queixo/maxilar inferior — melhora o "abrir a boca".', optional: true, color: 0xfbbf24 },
+  { key: 'jaw', label: 'Queixo (opcional)', hint: 'Clique na ponta do queixo — melhora o "abrir a boca".', optional: true, color: 0xfbbf24 },
 ]
 
 const REQUIRED: LandmarkKey[] = ['eyeLeft', 'eyeRight', 'mouthLeft', 'mouthRight']
 const AVATAR_META = { title: 'Gerador3D Avatar', author: 'Gerador3D' }
+const colorOf = (k: LandmarkKey) => STEPS.find((s) => s.key === k)!.color
 
 type Marks = Partial<Record<LandmarkKey, [number, number, number]>>
+
+function downloadBytes(buf: ArrayBuffer, filename: string): void {
+  const blob = new Blob([buf], { type: 'model/gltf-binary' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
 
 export default function FaceRigPanel({
   avatar,
@@ -61,39 +66,63 @@ export default function FaceRigPanel({
   onClose: () => void
   onBuilt: () => void
 }) {
-  const [step, setStep] = useState(0)
   const [marks, setMarks] = useState<Marks>({})
+  const [activeKey, setActiveKey] = useState<LandmarkKey | null>('eyeLeft')
   const [built, setBuilt] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState<'' | 'vrm' | 'glb' | 'save'>('')
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const ready = REQUIRED.every((k) => marks[k])
-  const picking = step < STEPS.length && !built
 
-  // Arm one-shot pick for the current step; advance when the user clicks.
+  // Keep the on-model markers in sync with the marks (and highlight the active).
+  useEffect(() => {
+    avatar.current?.setMarkers(
+      (Object.keys(marks) as LandmarkKey[]).map((k) => ({
+        local: marks[k]!,
+        color: k === activeKey ? 0xffffff : colorOf(k),
+      })),
+    )
+  }, [marks, activeKey, avatar])
+
+  // Arm one-shot pick for the active landmark; store + advance on click.
   useEffect(() => {
     const a = avatar.current
-    if (!a || !picking) return
+    if (!a || !activeKey) return
     let cancelled = false
     void a.pickPoint().then((hit) => {
       if (cancelled || !hit) return
-      a.addMarker(hit.world, STEPS[step].color)
-      setMarks((m) => ({ ...m, [STEPS[step].key]: hit.local }))
-      setStep((s) => s + 1)
+      const key = activeKey
+      setMarks((m) => ({ ...m, [key]: hit.local }))
+      if (built) setDirty(true)
+      // Advance to the next still-missing required point, else stop.
+      const next = REQUIRED.find((k) => k !== key && !marks[k])
+      setActiveKey(next ?? null)
     })
     return () => {
       cancelled = true
       a.cancelPick()
     }
-  }, [step, picking, avatar])
+  }, [activeKey, avatar, built, marks])
+
+  const autoGuess = useCallback(() => {
+    const g = avatar.current?.guessLandmarks()
+    if (!g) return
+    setMarks(g)
+    setActiveKey(null)
+    if (built) setDirty(true)
+    setError('Estimativa aplicada — gire o modelo e corrija qualquer ponto fora do lugar clicando nele.')
+  }, [avatar, built])
 
   const reset = useCallback(() => {
     avatar.current?.clearMarkers()
     avatar.current?.clearPreview()
     setMarks({})
-    setStep(0)
+    setActiveKey('eyeLeft')
     setBuilt(false)
+    setDirty(false)
+    setSaved(false)
     setError(null)
   }, [avatar])
 
@@ -112,22 +141,18 @@ export default function FaceRigPanel({
       a.buildFaceRig(lm)
       saveLandmarks(modelUrl, lm)
       setBuilt(true)
+      setDirty(false)
+      setSaved(false)
       onBuilt()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao gerar as expressões.')
     }
   }, [avatar, ready, marks, modelUrl, onBuilt])
 
-  // Quick visual test of the generated morphs (camera off).
   const preview = useCallback(
     (name: string, value: number) => avatar.current?.previewMorph(name, value),
     [avatar],
   )
-
-  const finish = useCallback(() => {
-    avatar.current?.clearPreview()
-    onClose()
-  }, [avatar, onClose])
 
   const downloadFile = useCallback(async (fmt: 'vrm' | 'glb') => {
     const a = avatar.current
@@ -135,8 +160,7 @@ export default function FaceRigPanel({
     setBusy(fmt)
     setError(null)
     try {
-      const buf = await a.exportAvatar(fmt, AVATAR_META)
-      downloadBytes(buf, fmt === 'vrm' ? 'avatar.vrm' : 'avatar-riggado.glb')
+      downloadBytes(await a.exportAvatar(fmt, AVATAR_META), fmt === 'vrm' ? 'avatar.vrm' : 'avatar-riggado.glb')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao exportar.')
     } finally {
@@ -151,8 +175,7 @@ export default function FaceRigPanel({
     setError(null)
     try {
       const buf = await a.exportAvatar('vrm', AVATAR_META)
-      const file = new File([buf], `avatar-${Date.now()}.vrm`, { type: 'model/gltf-binary' })
-      await upload3DModel(file)
+      await upload3DModel(new File([buf], `avatar-${Date.now()}.vrm`, { type: 'model/gltf-binary' }))
       setSaved(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao salvar.')
@@ -160,6 +183,11 @@ export default function FaceRigPanel({
       setBusy('')
     }
   }, [avatar])
+
+  const finish = useCallback(() => {
+    avatar.current?.clearPreview()
+    onClose()
+  }, [avatar, onClose])
 
   return (
     <div className="rounded-2xl border border-brand-500/30 bg-brand-600/[0.06] p-4">
@@ -172,81 +200,84 @@ export default function FaceRigPanel({
         </button>
       </div>
 
-      {!built ? (
-        <>
-          <p className="text-xs text-slate-300">
-            Gire o modelo (arraste) e clique nos pontos. Funciona em qualquer
-            personagem — humano ou criatura.
-          </p>
+      <p className="text-xs text-slate-300">
+        Gire o modelo (arraste) e clique nos pontos. Errou? Clique de novo na parte
+        na lista para remarcar — sem recomeçar. Funciona em qualquer personagem.
+      </p>
 
-          <ol className="mt-3 space-y-1.5">
-            {STEPS.map((s, i) => {
-              const done = Boolean(marks[s.key])
-              const current = i === step && picking
-              return (
-                <li
-                  key={s.key}
-                  className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
-                    current
-                      ? 'bg-brand-600/20 text-brand-100 ring-1 ring-brand-500/40'
-                      : done
-                        ? 'text-emerald-300'
-                        : 'text-slate-400'
-                  }`}
-                >
-                  <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] ${
-                      done ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/10'
-                    }`}
-                  >
-                    {done ? <Check className="h-2.5 w-2.5" /> : i + 1}
-                  </span>
-                  <span>{s.label}{s.optional ? '' : ' *'}</span>
-                </li>
-              )
-            })}
-          </ol>
+      <button
+        onClick={autoGuess}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-slate-800/40 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800/70"
+      >
+        <Wand2 className="h-3.5 w-3.5" /> Estimar pontos automaticamente
+      </button>
 
-          {picking && (
-            <p className="mt-2 rounded-lg bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200">
-              👉 {STEPS[step].hint}
-            </p>
-          )}
+      <ol className="mt-3 space-y-1.5">
+        {STEPS.map((s) => {
+          const done = Boolean(marks[s.key])
+          const active = s.key === activeKey
+          return (
+            <li key={s.key}>
+              <button
+                onClick={() => setActiveKey(s.key)}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition ${
+                  active
+                    ? 'bg-brand-600/25 text-brand-50 ring-1 ring-brand-400/60'
+                    : done
+                      ? 'text-emerald-300 hover:bg-white/5'
+                      : 'text-slate-400 hover:bg-white/5'
+                }`}
+              >
+                <span
+                  className="flex h-3.5 w-3.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: `#${s.color.toString(16).padStart(6, '0')}` }}
+                />
+                <span className="flex-1">{s.label}{s.optional ? '' : ' *'}</span>
+                {done ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Pencil className="h-3 w-3 opacity-50" />}
+              </button>
+            </li>
+          )
+        })}
+      </ol>
 
-          {error && (
-            <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">{error}</p>
-          )}
+      {activeKey && (
+        <p className="mt-2 rounded-lg bg-slate-800/60 px-2.5 py-2 text-[11px] text-slate-200">
+          👉 {STEPS.find((s) => s.key === activeKey)!.hint}
+        </p>
+      )}
+      {error && (
+        <p className="mt-2 rounded-lg bg-slate-700/40 px-2.5 py-2 text-[11px] text-slate-200">{error}</p>
+      )}
 
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={reset}
-              className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5"
-            >
-              <RotateCcw className="h-3.5 w-3.5" /> Recomeçar
-            </button>
-            <button
-              onClick={build}
-              disabled={!ready}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-500 disabled:opacity-40"
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Gerar expressões
-            </button>
-          </div>
-          {!ready && (
-            <p className="mt-1.5 text-center text-[10px] text-slate-500">
-              Marque ao menos os 4 pontos com * (queixo é opcional).
-            </p>
-          )}
-        </>
-      ) : (
-        <>
+      <div className="mt-3 flex gap-2">
+        <button
+          onClick={reset}
+          className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5"
+        >
+          <RotateCcw className="h-3.5 w-3.5" /> Limpar
+        </button>
+        <button
+          onClick={build}
+          disabled={!ready}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-500 disabled:opacity-40"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {built ? (dirty ? 'Atualizar expressões' : 'Regerar') : 'Gerar expressões'}
+        </button>
+      </div>
+      {!ready && (
+        <p className="mt-1.5 text-center text-[10px] text-slate-500">
+          Marque os 4 pontos com * (queixo é opcional) ou use "Estimar".
+        </p>
+      )}
+
+      {built && (
+        <div className="mt-4 border-t border-white/10 pt-3">
           <p className="rounded-lg bg-emerald-500/10 px-2.5 py-2 text-xs text-emerald-300">
-            Expressões geradas e salvas! Teste abaixo; depois inicie a câmera para
-            animar com seu rosto.
+            Expressões ativas! Teste abaixo; inicie a câmera para animar com seu rosto.
           </p>
-          <p className="mt-3 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">
-            Testar (segure)
-          </p>
+
+          <p className="mt-3 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Testar (segure)</p>
           <div className="grid grid-cols-2 gap-2">
             <TestBtn label="Abrir boca" onDown={() => preview('jawOpen', 1)} onUp={() => preview('jawOpen', 0)} />
             <TestBtn label="Sorrir" onDown={() => { preview('mouthSmileLeft', 1); preview('mouthSmileRight', 1) }} onUp={() => { preview('mouthSmileLeft', 0); preview('mouthSmileRight', 0) }} />
@@ -254,9 +285,7 @@ export default function FaceRigPanel({
             <TestBtn label="Bico (ou)" onDown={() => preview('mouthPucker', 1)} onUp={() => preview('mouthPucker', 0)} />
           </div>
 
-          <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">
-            Exportar avatar (com expressões)
-          </p>
+          <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Exportar avatar (com expressões)</p>
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={saveToLibrary}
@@ -284,27 +313,16 @@ export default function FaceRigPanel({
             {busy === 'glb' ? 'Gerando…' : 'Baixar .glb (com morphs)'}
           </button>
           <p className="mt-1.5 text-[10px] text-slate-500">
-            .vrm com esqueleto + expressões para VSeeFace/VTube Studio · .glb com morphs ARKit.
+            .vrm com esqueleto + expressões (VSeeFace/VTube Studio) · .glb com morphs ARKit.
           </p>
-          {error && (
-            <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">{error}</p>
-          )}
 
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={reset}
-              className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5"
-            >
-              <RotateCcw className="h-3.5 w-3.5" /> Refazer
-            </button>
-            <button
-              onClick={finish}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
-            >
-              <Check className="h-3.5 w-3.5" /> Concluir
-            </button>
-          </div>
-        </>
+          <button
+            onClick={finish}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500"
+          >
+            <Check className="h-3.5 w-3.5" /> Concluir
+          </button>
+        </div>
       )}
     </div>
   )
