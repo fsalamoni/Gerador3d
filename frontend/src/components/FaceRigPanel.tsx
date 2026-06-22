@@ -78,6 +78,7 @@ export default function FaceRigPanel({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [gain, setGain] = useState(1.5)
+  const [interior, setInterior] = useState(false)
 
   const ready = REQUIRED.every((k) => marks[k])
 
@@ -131,7 +132,7 @@ export default function FaceRigPanel({
     setError(null)
   }, [avatar])
 
-  const buildWith = useCallback((g: number) => {
+  const buildWith = useCallback((g: number, withInterior = interior) => {
     const a = avatar.current
     if (!a || !ready) return
     setError(null)
@@ -147,7 +148,7 @@ export default function FaceRigPanel({
         ...(marks.browRight ? { browRight: marks.browRight } : {}),
         ...(marks.jaw ? { jaw: marks.jaw } : {}),
       }
-      a.buildFaceRig(lm, g)
+      a.buildFaceRig(lm, g, withInterior)
       saveLandmarks(modelUrl, lm)
       setBuilt(true)
       setDirty(false)
@@ -156,7 +157,7 @@ export default function FaceRigPanel({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao gerar as expressões.')
     }
-  }, [avatar, ready, marks, modelUrl, onBuilt])
+  }, [avatar, ready, marks, modelUrl, onBuilt, interior])
 
   const build = useCallback(() => buildWith(gain), [buildWith, gain])
 
@@ -281,6 +282,26 @@ export default function FaceRigPanel({
           Marque os 4 pontos com * (queixo é opcional) ou use "Estimar".
         </p>
       )}
+
+      <label className="mt-2.5 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={interior}
+          onChange={(e) => {
+            const on = e.target.checked
+            setInterior(on)
+            if (built) buildWith(gain, on)
+          }}
+          className="mt-0.5 accent-brand-500"
+        />
+        <span className="text-[11px] leading-snug text-slate-300">
+          Criar interior da boca <span className="text-slate-500">(cavidade + dentes + língua)</span>
+          <br />
+          <span className="text-[10px] text-slate-500">
+            Para modelos "fechados" sem boca por dentro. Aparece ao abrir a boca. Experimental — me diga como ficou.
+          </span>
+        </span>
+      </label>
 
       {built && (
         <div className="mt-4 border-t border-white/10 pt-3">

@@ -31,6 +31,7 @@ import {
   loadLandmarks,
   type FaceLandmarks,
 } from '../lib/procedural-face-rig'
+import { buildMouthInterior, MOUTH_INTERIOR_NAME } from '../lib/mouth-interior'
 import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
@@ -51,8 +52,9 @@ export interface AvatarCanvasHandle {
   /** Heuristic landmark guess from the face mesh bounds (a starting point). */
   guessLandmarks: () => FaceLandmarks | null
   /** Build ARKit morphs on the face mesh from landmarks. `gain` = strength.
-   * Throws if no mesh. */
-  buildFaceRig: (lm: FaceLandmarks, gain?: number) => string[]
+   * When `addInterior`, also generates a mouth interior (cavity + teeth +
+   * tongue) so opening the mouth reveals a real inside. Throws if no mesh. */
+  buildFaceRig: (lm: FaceLandmarks, gain?: number, addInterior?: boolean) => string[]
   /** Whether a riggable mesh (with vertices) is loaded. */
   hasRiggableMesh: () => boolean
   /** Whether the loaded mesh already exposes ARKit-named morphs. */
@@ -182,10 +184,18 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
         jaw: [cx, Y(0.22), zf],
       }
     },
-    buildFaceRig: (lm, gain) => {
+    buildFaceRig: (lm, gain, addInterior) => {
       const mesh = faceMeshRef.current
       if (!mesh) throw new Error('Nenhuma malha de rosto carregada.')
-      return buildProceduralMorphs(mesh, lm, gain ?? 1.5)
+      const names = buildProceduralMorphs(mesh, lm, gain ?? 1.5)
+      // Drop any previous interior, then (re)build if requested.
+      const old = mesh.getObjectByName(MOUTH_INTERIOR_NAME)
+      if (old) old.parent?.remove(old)
+      if (addInterior) {
+        const interior = buildMouthInterior(mesh, lm)
+        if (interior) mesh.add(interior)
+      }
+      return names
     },
     hasRiggableMesh: () => Boolean(faceMeshRef.current),
     hasArkitMorphs: () => (rootRef.current ? meshHasArkitMorphs(rootRef.current) : false),
@@ -196,11 +206,22 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       if (mesh && dict && name in dict && mesh.morphTargetInfluences) {
         mesh.morphTargetInfluences[dict[name]] = value
       }
+      // Drive the matching morph on the mouth-interior pieces too.
+      mesh?.getObjectByName(MOUTH_INTERIOR_NAME)?.traverse((o) => {
+        const m = o as THREE.Mesh
+        if (m.morphTargetDictionary && name in m.morphTargetDictionary && m.morphTargetInfluences) {
+          m.morphTargetInfluences[m.morphTargetDictionary[name]] = value
+        }
+      })
     },
     clearPreview: () => {
       previewRef.current = null
       const mesh = faceMeshRef.current
       if (mesh?.morphTargetInfluences) mesh.morphTargetInfluences.fill(0)
+      mesh?.getObjectByName(MOUTH_INTERIOR_NAME)?.traverse((o) => {
+        const inf = (o as THREE.Mesh).morphTargetInfluences
+        if (inf) inf.fill(0)
+      })
     },
     exportAvatar: (format, meta) => {
       if (format === 'vrm') {

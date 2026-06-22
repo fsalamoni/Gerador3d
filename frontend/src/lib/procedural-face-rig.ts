@@ -59,6 +59,53 @@ const gauss = (d: number, sigma: number) => Math.exp(-(d * d) / (2 * sigma * sig
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x)
 
 /**
+ * Face-local frame + scales derived from the landmarks. Shared by the morph
+ * generator and the procedural mouth-interior builder so they agree by
+ * construction. `centroid` (mesh centroid) orients `fwd` outward.
+ */
+export interface FaceFrame {
+  right: THREE.Vector3
+  up: THREE.Vector3
+  fwd: THREE.Vector3
+  mouthC: THREE.Vector3
+  eyeMid: THREE.Vector3
+  mouthW: number
+  mouthH: number
+  eyeW: number
+  faceH: number
+}
+
+export function computeFaceFrame(lm: FaceLandmarks, centroid?: THREE.Vector3): FaceFrame {
+  const eyeL = v(lm.eyeLeft)
+  const eyeR = v(lm.eyeRight)
+  const mouthL = v(lm.mouthLeft)
+  const mouthR = v(lm.mouthRight)
+  const upLip = v(lm.upperLip)
+  const loLip = v(lm.lowerLip)
+  const mouthC = mouthL.clone().add(mouthR).multiplyScalar(0.5)
+  const eyeMid = eyeL.clone().add(eyeR).multiplyScalar(0.5)
+  const right = mouthR.clone().sub(mouthL).normalize()
+  const up = eyeMid.clone().sub(mouthC)
+  up.addScaledVector(right, -up.dot(right)).normalize()
+  const fwd = new THREE.Vector3().crossVectors(right, up).normalize()
+  if (centroid && mouthC.clone().sub(centroid).dot(fwd) < 0) fwd.negate()
+  return {
+    right, up, fwd, mouthC, eyeMid,
+    mouthW: Math.max(1e-5, mouthL.distanceTo(mouthR)),
+    mouthH: Math.max(mouthL.distanceTo(mouthR) * 0.18, upLip.distanceTo(loLip)),
+    eyeW: Math.max(1e-5, eyeL.distanceTo(eyeR)),
+    faceH: Math.max(1e-5, eyeMid.distanceTo(mouthC)),
+  }
+}
+
+export function meshCentroid(pos: THREE.BufferAttribute): THREE.Vector3 {
+  const c = new THREE.Vector3()
+  const n = pos.count
+  for (let i = 0; i < n; i++) c.x += pos.getX(i), (c.y += pos.getY(i)), (c.z += pos.getZ(i))
+  return c.multiplyScalar(1 / Math.max(1, n))
+}
+
+/**
  * Generate procedural morph targets on `mesh` from `lm`. `gain` scales the
  * overall expression strength (1 = natural, higher = more exaggerated). Adds
  * (relative) morph attributes named per {@link GENERATED_SHAPES}, refreshes the
@@ -274,13 +321,6 @@ function radialDir(arr: Float32Array, i: number, d: THREE.Vector3, s: number): v
   arr[i * 3] += d.x * s
   arr[i * 3 + 1] += d.y * s
   arr[i * 3 + 2] += d.z * s
-}
-
-function meshCentroid(pos: THREE.BufferAttribute): THREE.Vector3 {
-  const c = new THREE.Vector3()
-  const n = pos.count
-  for (let i = 0; i < n; i++) c.x += pos.getX(i), (c.y += pos.getY(i)), (c.z += pos.getZ(i))
-  return c.multiplyScalar(1 / Math.max(1, n))
 }
 
 // ── Persistence ───────────────────────────────────────────────────────────────
