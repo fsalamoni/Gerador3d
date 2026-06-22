@@ -14,7 +14,7 @@ def check(n, c): print(("PASS" if c else "FAIL"), "-", n); OK.append(bool(c))
 
 IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMCAQDJrPU4AAAAAElFTkSuQmCC"
 
-def gen_ok(backend_name, task, prompt, image_path, out_path, progress=None):
+def gen_ok(backend_name, task, prompt, image_path, out_path, progress=None, params=None):
     if progress: progress(50, "x")
     Path(out_path).write_bytes(b"GLB" * 30)
 

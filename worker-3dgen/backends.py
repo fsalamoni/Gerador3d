@@ -410,14 +410,8 @@ def _run_hunyuan(cache_key, default_model, default_subfolder, task, prompt,
     # instalação padrão. Habilite com params{"texture": true} se compilou-os.
     if params.get("texture", False):
         try:
-            if progress:
-                progress(78, "aplicando textura PBR")
-            from hy3dgen.texgen import Hunyuan3DPaintPipeline
-            paint_key = cache_key + ":paint"
-            if paint_key not in _MODELS:
-                _MODELS[paint_key] = Hunyuan3DPaintPipeline.from_pretrained(
-                    os.environ.get("HUNYUAN_PAINT_MODEL", "tencent/Hunyuan3D-2"))
-            mesh = _MODELS[paint_key](mesh, image=image_path)
+            mesh = paint_texture(mesh, image_path, params, progress,
+                                 cache_key=cache_key + ":paint")
         except Exception as exc:  # noqa: BLE001
             print(f"[backends] textura PBR indisponível ({exc}); exportando geometria.",
                   flush=True)
@@ -445,6 +439,113 @@ def _hunyuan_mini_mv(task, prompt, image_path, out_path, progress, params=None):
                  os.environ.get("HUNYUAN_MV_MODEL", "tencent/Hunyuan3D-2mv"),
                  os.environ.get("HUNYUAN_MV_SUBFOLDER", "hunyuan3d-dit-v2-mv"),
                  task, prompt, image_path, out_path, progress, params)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Texturização PBR — Hunyuan3D-Paint (Tencent)
+# Aplica material PBR a uma malha (recém-gerada OU enviada/esculpida) a partir de
+# uma imagem de referência. https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1
+#
+# IMPORTANTE (honestidade técnica): a GEOMETRIA do paint exige GPU e módulos
+# compilados (custom_rasterizer + differentiable_renderer). O fluxo de CONTROLE
+# abaixo (detecção de layout, fallbacks, exportação) é coberto por smoke test sem
+# GPU (tests/test_paint.py); a QUALIDADE do resultado é validada em máquina com
+# GPU/pesos — não dá para verificar aqui.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _load_paint_pipeline(params):
+    """Carrega o pipeline de TEXTURA (paint) do Hunyuan3D cobrindo os dois layouts
+    de repositório, e devolve `(layout, pipe)`:
+
+      - "v21": repo `Hunyuan3D-2.1` → `hy3dpaint/textureGenPipeline.py`
+               (PBR completo; opera sobre CAMINHOS de arquivo). Exige
+               custom_rasterizer + differentiable_renderer compilados.
+      - "v2" : `hy3dgen.texgen.Hunyuan3DPaintPipeline.from_pretrained(...)`
+               (Hunyuan3D-2 / 2mini; opera direto sobre a malha trimesh).
+
+    Levanta RuntimeError com instrução clara se nenhum estiver disponível.
+    """
+    params = params or {}
+    _ensure_local_repo_on_path("Hunyuan3D-2.1", "Hunyuan3D-2", "Hunyuan3D-2GP")
+    # O paint do 2.1 vive em hy3dpaint/ — precisa estar no sys.path.
+    here = Path(__file__).resolve().parent
+    for sub in ("Hunyuan3D-2.1/hy3dpaint", "Hunyuan3D-2.1"):
+        cand = here / sub
+        if cand.exists() and str(cand) not in sys.path:
+            sys.path.insert(0, str(cand))
+
+    errors = []
+    # 1) Tenta o 2.1 primeiro (PBR completo).
+    try:
+        from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig  # type: ignore
+        max_views = int(params.get("maxViews") or os.environ.get("HUNYUAN_PAINT_VIEWS", "6"))
+        res = int(params.get("textureResolution") or os.environ.get("HUNYUAN_PAINT_RES", "512"))
+        try:
+            conf = Hunyuan3DPaintConfig(max_views, res)
+        except TypeError:
+            conf = Hunyuan3DPaintConfig()  # versões que não aceitam args posicionais
+        return ("v21", Hunyuan3DPaintPipeline(conf))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"2.1 (hy3dpaint): {exc}")
+    # 2) Cai para o 2 / 2mini.
+    try:
+        from hy3dgen.texgen import Hunyuan3DPaintPipeline  # type: ignore
+        model = os.environ.get("HUNYUAN_PAINT_MODEL", "tencent/Hunyuan3D-2")
+        return ("v2", Hunyuan3DPaintPipeline.from_pretrained(model))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"2.0 (hy3dgen.texgen): {exc}")
+
+    raise RuntimeError(
+        "Hunyuan3D-Paint indisponível. Requer o repositório Hunyuan3D-2.1 (hy3dpaint, "
+        "com custom_rasterizer + differentiable_renderer compilados) OU hy3dgen.texgen "
+        "(Hunyuan3D-2). Detalhes: " + " | ".join(errors))
+
+
+def paint_texture(mesh, image_path, params=None, progress=None, cache_key="paint"):
+    """Aplica textura PBR a uma malha `trimesh` usando Hunyuan3D-Paint e a imagem
+    de referência. Devolve a malha texturizada (trimesh). O pipeline é cacheado
+    por `cache_key`. GPU obrigatória."""
+    params = params or {}
+    if not image_path:
+        raise ValueError("paint_texture requer uma imagem de referência.")
+    if progress:
+        progress(78, "aplicando textura PBR")
+    if cache_key not in _MODELS:
+        _MODELS[cache_key] = _load_paint_pipeline(params)
+    layout, pipe = _MODELS[cache_key]
+
+    if layout == "v21":
+        # A API 2.1 opera sobre arquivos: exporta a malha, pinta, recarrega.
+        import trimesh
+        tmp_in = str(Path(tempfile.gettempdir()) / "gr3d_paint_in.obj")
+        tmp_out = str(Path(tempfile.gettempdir()) / "gr3d_paint_out.obj")
+        mesh.export(tmp_in)
+        try:
+            res = pipe(tmp_in, image_path=image_path, output_mesh_path=tmp_out)
+        except TypeError:
+            res = pipe(mesh_path=tmp_in, image_path=image_path)  # assinatura alternativa
+        out = res if isinstance(res, str) and Path(res).exists() else tmp_out
+        return trimesh.load(out, force="mesh")
+
+    # layout "v2": pinta direto na malha.
+    return pipe(mesh, image=image_path)
+
+
+def texture_mesh(mesh_path, image_path, out_path, progress=None, params=None):
+    """Texturiza uma malha EXISTENTE (rosto esculpido/enviado) com Hunyuan3D-Paint
+    a partir de uma imagem de referência, e grava o .glb texturizado em out_path.
+
+    É o caminho alinhado à filosofia do projeto: não regerar a forma — só *fabricar*
+    a aparência (material PBR) sobre a geometria que o usuário já tem."""
+    params = params or {}
+    if progress:
+        progress(20, "carregando malha")
+    import trimesh
+    mesh = trimesh.load(mesh_path, force="mesh")
+    mesh = paint_texture(mesh, image_path, params, progress, cache_key="paint")
+    if progress:
+        progress(90, "exportando GLB")
+    mesh.export(out_path)
 
 
 _BACKENDS = {

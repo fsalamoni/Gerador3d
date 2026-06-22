@@ -49,11 +49,28 @@ Exponha com cloudflared/ngrok (igual ao worker de rigging) e cole a URL em
 ## API
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/api/generate` | `{ task, prompt, imageDataUrl, uploadUrl }` → `{ taskId }` |
+| POST | `/api/generate` | `{ task, prompt, imageDataUrl, uploadUrl, meshUrl?, meshDataUrl?, params? }` → `{ taskId }` |
 | GET  | `/api/status/{taskId}` | `{ status, progress, error? }` |
 | GET  | `/api/health` | `{ status, backend, cuda }` |
 
-`task` ∈ `image_to_3d | text_to_3d`.
+`task` ∈ `image_to_3d | text_to_3d | texture_mesh`.
+
+`params` (opcional) repassa opções ao backend, ex.: `{ "texture": true, "seed": 7 }`.
+
+### Texturização PBR (Hunyuan3D-Paint)
+Dois caminhos:
+- **Na geração:** `params.texture = true` aplica textura PBR à malha recém-gerada
+  (backends `hunyuan` / `hunyuan-mini`).
+- **Em malha existente:** `task = "texture_mesh"` + a malha (`meshUrl` para baixar
+  **ou** `meshDataUrl` base64) + uma imagem de referência (`imageDataUrl`). Pinta
+  PBR sobre a geometria que você já tem — **não** regera a forma.
+
+Cobre os dois layouts do repositório: **2.1** (`hy3dpaint`, PBR completo, preferido)
+e **2.0/2mini** (`hy3dgen.texgen`). Exige **GPU** e os módulos compilados
+`custom_rasterizer` + `differentiable_renderer` (não vêm na instalação padrão); sem
+eles, a geração ainda exporta a geometria e o `texture_mesh` falha com mensagem clara.
+O fluxo de controle tem smoke test sem GPU (`python tests/test_paint.py`); a qualidade
+do resultado é validada em máquina com GPU/pesos.
 
 ## Observação importante
 Os pesos dos modelos são baixados do Hugging Face na 1ª execução (uma vez) e
