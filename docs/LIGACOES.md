@@ -81,19 +81,30 @@ fábrica você liga quando quiser (e só uma vez).
   pagando pouco por geração (~US$0,02–0,40). Bom meio-termo.
 - **O que precisa:** conta + **chave de API** + créditos.
 
-### E) ElevenLabs + Audio2Face — *avatar que fala (lip-sync)* 🔵 *(futuro)*
+### E) ElevenLabs + Audio2Face — *avatar que fala (lip-sync)* 🟠 *(estruturado)*
 - **O que desbloqueia:** digitar um texto → virar voz → mover a boca do avatar
   automaticamente (reaproveita a boca que já criamos).
-- **O que precisa:** chave da ElevenLabs (voz) e o modelo Audio2Face (aberto, NVIDIA).
-- **Status:** ainda **não implementado** — está no roadmap (fase 1).
+- **O que precisa:** chave da ElevenLabs (voz). Para lip-sync preciso por fonema,
+  o modelo Audio2Face/NeuroSync (aberto, NVIDIA).
+- **Status:** **estruturado no código** (`lib/lipsync.ts`): o "flap" da boca por
+  amplitude de áudio **já funciona sem chave**; a voz ElevenLabs entra ao colar a
+  chave; Audio2Face é o upgrade de qualidade. Falta só a UI de "falar".
 
-### F) Copiloto de IA (OpenRouter / Groq) — *assistente que entende foto/texto* 🔵 *(futuro)*
-- **O que desbloqueia:** "ler" uma foto de referência e **sugerir os landmarks**;
-  ajustar o rosto por comando de voz/texto ("olhos maiores", "boca mais larga").
+### F) Copiloto de IA (OpenRouter / Groq) — *assistente que entende foto* 🟠 *(estruturado)*
+- **O que desbloqueia:** "ler" uma foto de referência e **sugerir os landmarks**
+  automaticamente, em vez de clicar ponto a ponto.
 - **O que precisa:** chave da OpenRouter ou Groq (Groq tem cota grátis).
-- **Status:** ainda **não implementado** — roadmap (fase 1).
+- **Status:** **estruturado no código** (`lib/copilot-client.ts`): chamada de visão +
+  parser dos pontos prontos e testados. Falta só colar a chave e o botão na UI.
 
-### G) Blender — *rigging/exportar VRM no worker* 🟢
+### G) UniRig — *esqueleto de corpo inteiro* 🟠 *(estruturado)*
+- **O que desbloqueia:** rig de **corpo** (ossos + pesos) para humanos e criaturas —
+  hoje o VRM é só busto. Licença MIT.
+- **O que precisa:** GPU + clonar o repositório UniRig no worker de rigging.
+- **Status:** **estruturado no código** (`worker-rigging/unirig.py`, flag
+  `method=unirig`); a CLI/qualidade são validadas na GPU.
+
+### H) Blender — *rigging/exportar VRM no worker* 🟢
 - **O que desbloqueia:** transferir blendshapes e exportar `.vrm` pelo worker de
   rigging (alternativa ao caminho do navegador).
 - **O que precisa:** ter o **Blender** instalado (o app detecta sozinho).
@@ -104,14 +115,15 @@ fábrica você liga quando quiser (e só uma vez).
 
 | Quero… | Precisa ligar? |
 |---|---|
-| Ajustar rosto, criar boca/olhos, animar por webcam, exportar | **Não** ✅ |
-| Mudar cor/material do modelo no Studio | **Não** ✅ |
+| Ajustar rosto, criar boca/olhos/**cabelo**, presets de **criatura**, animar por webcam, exportar | **Não** ✅ |
+| Mudar **cor/material** do modelo no Studio | **Não** ✅ |
+| Lip-sync simples (boca acompanha um áudio) | **Não** ✅ (flap por amplitude) |
 | Gerar 3D a partir de foto/desenho **de graça** | **A)** GPU local |
 | Gerar 3D **sem ter GPU** | **C)** ou **D)** (chave de API) |
 | Textura PBR realista | **B)** GPU + módulos compilados |
-| Avatar que fala | **E)** *(futuro)* |
-| Assistente que lê foto e sugere pontos | **F)** *(futuro)* |
-| Esqueleto de **corpo** inteiro | UniRig *(futuro — roadmap fase 1)* |
+| Voz realista (ElevenLabs) | **E)** chave (código pronto) |
+| Assistente que lê foto e sugere pontos | **F)** chave (código pronto) |
+| Esqueleto de **corpo** inteiro | **G)** UniRig — GPU + repo (código pronto) |
 
 ---
 

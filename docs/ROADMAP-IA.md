@@ -32,7 +32,11 @@
   worker) e testado por build/typecheck. Falta só validar a qualidade em GPU.
 - ✅ **Landmarks geométricos** que grudam na superfície + simetria → o rig agora funciona
   bem em humanoides de **desenho/estilizados**, não só fotos.
-- ✅ **Ligações documentadas** para leigos em `docs/LIGACOES.md`.
+- ✅ **Presets de criatura** (pupila em fenda, presas, olhos grandes) + **cabelo procedural**
+  + **editor de material/PBR** no Studio.
+- ✅ **Scaffolds atrás de flag/chave** (código pronto + smoke test, validar na ligação):
+  **UniRig** (corpo), **lip-sync/voz** (ElevenLabs + Audio2Face), **copiloto** (foto→pontos).
+- ✅ **Ligações documentadas** para leigos em `docs/LIGACOES.md` + card de status no app.
 
 **Lacunas principais (o que NÃO existe):**
 1. Rig de **corpo/esqueleto** real e **skinning** (pesos) — VRM é só busto.
