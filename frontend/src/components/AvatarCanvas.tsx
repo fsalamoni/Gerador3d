@@ -33,6 +33,7 @@ import {
 } from '../lib/procedural-face-rig'
 import { buildMouthInterior, MOUTH_INTERIOR_NAME } from '../lib/mouth-interior'
 import { buildEyeAnatomy, EYE_ANATOMY_NAME } from '../lib/eye-anatomy'
+import { sampleSkinTone } from '../lib/skin-sampling'
 import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
@@ -204,7 +205,9 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
         if (interior) mesh.add(interior)
       }
       if (parts?.eyes) {
-        const eyes = buildEyeAnatomy(mesh, lm)
+        // Match the eyelids to the model's own skin instead of a neutral tone.
+        const skin = sampleSkinTone(mesh, lm)
+        const eyes = buildEyeAnatomy(mesh, lm, { skinColor: skin.color })
         if (eyes) mesh.add(eyes)
       }
       return names

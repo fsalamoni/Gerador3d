@@ -26,8 +26,10 @@ export interface EyeOptions {
   radiusFrac?: number
   /** Iris colour (default warm brown). */
   irisColor?: number
-  /** Eyelid (skin) colour — neutral mid-tone by default; tune per model. */
-  skinColor?: number
+  /** Eyelid (skin) colour — neutral mid-tone by default; tune per model.
+   * Accepts a hex or a {@link THREE.Color} (e.g. sampled from the model's skin
+   * via {@link sampleSkinTone}). */
+  skinColor?: number | THREE.Color
 }
 
 /** Direction on the unit sphere around the front pole (+z=fwd). h=horizontal
