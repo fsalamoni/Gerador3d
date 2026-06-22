@@ -20,7 +20,9 @@ import uuid
 import requests
 from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+import unirig  # adaptador UniRig (esqueleto de corpo) — atrás de flag method=unirig
 
 for _s in (sys.stdout, sys.stderr):  # logs UTF-8 (evita cp1252 no Windows)
     try:
@@ -41,6 +43,10 @@ class RigRequest(BaseModel):
     # Link assinado (PUT) onde devolvemos o resultado. Se vazio, o worker
     # apenas processa e marca sucesso (útil para testes locais).
     uploadUrl: str = ""
+    # 'blender' (padrão): rig FACIAL por template (.vrm, busto).
+    # 'unirig': esqueleto + skinning de CORPO inteiro (.glb) via UniRig (exige GPU).
+    method: str = "blender"
+    params: dict = Field(default_factory=dict)
 
 
 def find_blender() -> str:
@@ -95,7 +101,52 @@ def _set(task_id: str, **kwargs):
     jobs[task_id].update(kwargs)
 
 
+def process_unirig(task_id: str, req: RigRequest):
+    """Rig de CORPO inteiro via UniRig (saída GLB riggado). Atrás de method=unirig."""
+    _set(task_id, status="in_progress", progress=5, error=None)
+    input_path = HERE / f"{task_id}.glb"
+    output_path = HERE / f"{task_id}_rigged.glb"
+    try:
+        if not req.downloadUrl:
+            raise ValueError("downloadUrl ausente: nada para processar.")
+        r = requests.get(req.downloadUrl, timeout=120)
+        r.raise_for_status()
+        input_path.write_bytes(r.content)
+        if input_path.stat().st_size == 0:
+            raise ValueError("GLB baixado está vazio.")
+        _set(task_id, progress=30)
+
+        def prog(pct, _msg=""):
+            _set(task_id, progress=max(5, min(95, int(pct))))
+
+        unirig.rig_with_unirig(str(input_path), str(output_path), progress=prog, params=req.params)
+        _set(task_id, progress=85)
+
+        if req.uploadUrl:
+            with open(output_path, "rb") as f:
+                up = requests.put(req.uploadUrl, data=f,
+                                  headers={"Content-Type": "application/octet-stream"}, timeout=300)
+                up.raise_for_status()
+            _set(task_id, progress=95)
+        _set(task_id, status="succeeded", progress=100)
+        print(f"[{task_id}] UniRig concluído.")
+    except requests.HTTPError as e:
+        _set(task_id, status="failed", error=f"Falha de rede ({e.response.status_code if e.response else '?'}).")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{task_id}] Erro (UniRig): {e}")
+        _set(task_id, status="failed", error=str(e)[:500])
+    finally:
+        for p in (input_path, output_path):
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+
+
 def process_rigging(task_id: str, req: RigRequest):
+    if (req.method or "blender").lower() == "unirig":
+        return process_unirig(task_id, req)
     _set(task_id, status="in_progress", progress=5, error=None)
     input_path = HERE / f"{task_id}.glb"
     output_path = HERE / f"{task_id}.vrm"
@@ -224,6 +275,7 @@ def health():
         "blender": BLENDER_EXE,
         "blender_found": Path(BLENDER_EXE).exists() or BLENDER_EXE == "blender",
         "template": find_template() or None,
+        "unirig": unirig.available(),
     }
 
 
