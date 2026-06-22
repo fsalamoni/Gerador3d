@@ -83,6 +83,9 @@ export default function FaceRigPanel({
   const [eyes, setEyes] = useState(false)
   const [hair, setHair] = useState(false)
   const [presetId, setPresetId] = useState('human')
+  const [mat, setMat] = useState<{ color: string; metalness: number; roughness: number } | null>(null)
+  const [hairColor, setHairColor] = useState('#2a1a12')
+  const [irisColor, setIrisColor] = useState('#5b3a1e')
 
   const ready = REQUIRED.every((k) => marks[k])
 
@@ -115,6 +118,20 @@ export default function FaceRigPanel({
       a.cancelPick()
     }
   }, [activeKey, avatar, built, marks])
+
+  // Seed the material editor from the loaded model's material.
+  useEffect(() => {
+    const info = avatar.current?.getMaterialInfo()
+    if (info) setMat(info)
+  }, [avatar, modelUrl])
+
+  const applyMat = useCallback(
+    (patch: { color?: string; metalness?: number; roughness?: number }) => {
+      setMat((m) => (m ? { ...m, ...patch } : m))
+      avatar.current?.setMaterial(patch)
+    },
+    [avatar],
+  )
 
   const autoGuess = useCallback(() => {
     const g = avatar.current?.guessLandmarks()
@@ -377,6 +394,64 @@ export default function FaceRigPanel({
           Afeta os olhos/boca criados acima.
         </p>
       </div>
+
+      {mat && (
+        <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+          <p className="text-[11px] font-medium text-slate-300">Material / cor</p>
+          <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-300">
+            <span>Cor base do modelo</span>
+            <input
+              type="color"
+              value={mat.color}
+              onChange={(e) => applyMat({ color: e.target.value })}
+              className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+            />
+          </div>
+          <div className="mt-1.5">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Brilho (menos áspero)</span>
+              <span className="text-slate-200">{(1 - mat.roughness).toFixed(2)}</span>
+            </div>
+            <input
+              type="range" min={0} max={1} step={0.05} value={mat.roughness}
+              onChange={(e) => applyMat({ roughness: Number(e.target.value) })}
+              className="w-full accent-brand-500"
+            />
+          </div>
+          <div className="mt-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Metálico</span>
+              <span className="text-slate-200">{mat.metalness.toFixed(2)}</span>
+            </div>
+            <input
+              type="range" min={0} max={1} step={0.05} value={mat.metalness}
+              onChange={(e) => applyMat({ metalness: Number(e.target.value) })}
+              className="w-full accent-brand-500"
+            />
+          </div>
+          <div className="mt-1.5 grid grid-cols-2 gap-2">
+            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
+              <span>Cabelo</span>
+              <input
+                type="color" value={hairColor}
+                onChange={(e) => { setHairColor(e.target.value); avatar.current?.setPartColor('hair', e.target.value) }}
+                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
+              <span>Íris</span>
+              <input
+                type="color" value={irisColor}
+                onChange={(e) => { setIrisColor(e.target.value); avatar.current?.setPartColor('iris', e.target.value) }}
+                className="h-6 w-10 cursor-pointer rounded border border-white/10 bg-transparent"
+              />
+            </label>
+          </div>
+          <p className="mt-1 text-[10px] text-slate-500">
+            Editado ao vivo e salvo no GLB exportado. Cabelo/íris só mudam se você os criou acima.
+          </p>
+        </div>
+      )}
 
       {built && (
         <div className="mt-4 border-t border-white/10 pt-3">

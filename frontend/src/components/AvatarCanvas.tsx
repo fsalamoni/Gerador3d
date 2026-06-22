@@ -75,6 +75,12 @@ export interface AvatarCanvasHandle {
   /** Bake the rigged avatar to a downloadable file (.glb keeps the whole model;
    * .vrm wraps the face mesh with a humanoid skeleton + VRM blendshapes). */
   exportAvatar: (format: 'glb' | 'vrm', meta?: VrmMeta) => Promise<ArrayBuffer>
+  /** Current face-material values (to seed the material editor), or null. */
+  getMaterialInfo: () => { color: string; metalness: number; roughness: number } | null
+  /** Live-edit the face mesh material (color is a #rrggbb sRGB string). */
+  setMaterial: (props: { color?: string; metalness?: number; roughness?: number }) => void
+  /** Recolour a generated anatomy part (hair / iris); color is #rrggbb sRGB. */
+  setPartColor: (part: 'hair' | 'iris', color: string) => void
 }
 
 interface Props {
@@ -101,6 +107,27 @@ function findLargestMesh(root: THREE.Object3D): THREE.Mesh | null {
     }
   })
   return best
+}
+
+/** Run `fn` over every MeshStandardMaterial on the face mesh (single or array). */
+function forEachStandardMaterial(
+  mesh: THREE.Mesh | null,
+  fn: (mat: THREE.MeshStandardMaterial) => void,
+): void {
+  if (!mesh) return
+  const mat = mesh.material as THREE.Material | THREE.Material[]
+  for (const m of Array.isArray(mat) ? mat : [mat]) {
+    if ((m as THREE.MeshStandardMaterial).isMeshStandardMaterial) fn(m as THREE.MeshStandardMaterial)
+  }
+}
+
+/** First MeshStandardMaterial on the face mesh, or null. */
+function firstStandardMaterial(mesh: THREE.Mesh | null): THREE.MeshStandardMaterial | null {
+  let found: THREE.MeshStandardMaterial | null = null
+  forEachStandardMaterial(mesh, (m) => {
+    if (!found) found = m
+  })
+  return found
 }
 
 function meshHasArkitMorphs(root: THREE.Object3D): boolean {
@@ -256,6 +283,33 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       const root = rootRef.current
       if (!root) return Promise.reject(new Error('Sem modelo para exportar.'))
       return exportGlb(root)
+    },
+    getMaterialInfo: () => {
+      const mat = firstStandardMaterial(faceMeshRef.current)
+      if (!mat) return null
+      return {
+        color: '#' + mat.color.getHexString(THREE.SRGBColorSpace),
+        metalness: mat.metalness,
+        roughness: mat.roughness,
+      }
+    },
+    setMaterial: (props) => {
+      forEachStandardMaterial(faceMeshRef.current, (mat) => {
+        if (props.color !== undefined) mat.color.set(props.color)
+        if (props.metalness !== undefined) mat.metalness = props.metalness
+        if (props.roughness !== undefined) mat.roughness = props.roughness
+      })
+    },
+    setPartColor: (part, color) => {
+      const suffix = part === 'hair' ? 'cap' : '_iris'
+      faceMeshRef.current?.traverse((o) => {
+        const m = o as THREE.Mesh
+        if (!m.isMesh || !o.name.endsWith(suffix)) return
+        const mat = m.material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[]
+        for (const mm of Array.isArray(mat) ? mat : [mat]) {
+          if ((mm as THREE.MeshStandardMaterial).color) (mm as THREE.MeshStandardMaterial).color.set(color)
+        }
+      })
     },
   }))
 
