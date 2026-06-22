@@ -25,10 +25,19 @@
 
 **Export:** GLB (completo, re-importável) + VRM (busto: 17 ossos, malha presa à cabeça).
 
+**Progresso recente (jun/2026, branch de trabalho):**
+- ✅ **Amostragem de pele** nas pálpebras (resolve o "tom neutro"; local, sem IA).
+- ✅ **Hunyuan3D-Paint estruturado** no worker (2.1 + 2.0) atrás de flag, com `texture_mesh`
+  para texturizar malha existente; fio de dados ligado ponta-a-ponta (frontend→CF/desktop→
+  worker) e testado por build/typecheck. Falta só validar a qualidade em GPU.
+- ✅ **Landmarks geométricos** que grudam na superfície + simetria → o rig agora funciona
+  bem em humanoides de **desenho/estilizados**, não só fotos.
+- ✅ **Ligações documentadas** para leigos em `docs/LIGACOES.md`.
+
 **Lacunas principais (o que NÃO existe):**
 1. Rig de **corpo/esqueleto** real e **skinning** (pesos) — VRM é só busto.
 2. **Edição manual** de malha: escultura, pintura de peso, posicionamento de ossos.
-3. **Edição de material/textura** (UI) e **texturização** por IA.
+3. **Edição de material/textura** (UI no Studio) — texturização por IA já estruturada (item ✅ acima).
 4. **Prior anatômico** de cabeça humana (a face hoje é 100% procedural).
 5. **Anatomia por espécie** para criaturas (boca/olhos hoje assumem formato primata).
 6. **Edição de blendshape**/keyframe e timeline de animação.
