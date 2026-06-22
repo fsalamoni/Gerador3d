@@ -17,6 +17,7 @@ import {
   localGetConfig, localSetBackend,
   type LocalDiagnostics, type ProvisionStatus,
 } from '../lib/local-api'
+import ConnectionsCard from '../components/ConnectionsCard'
 
 const BACKEND_LABELS: Record<string, string> = {
   triposr: 'TripoSR',
@@ -74,8 +75,12 @@ export default function SetupPage() {
 
   if (!IS_LOCAL) {
     return (
-      <div className="mx-auto max-w-3xl py-16 text-center text-slate-400">
-        Esta página é exclusiva do aplicativo local (desktop).
+      <div className="mx-auto max-w-3xl py-10">
+        <ConnectionsCard diag={null} />
+        <p className="mt-4 text-center text-sm text-slate-400">
+          A instalação de recursos locais (GPU, Blender) é exclusiva do aplicativo desktop.
+          No modo web, use provedores na nuvem (Configurações → Provedores).
+        </p>
       </div>
     )
   }
@@ -103,6 +108,8 @@ export default function SetupPage() {
           </p>
         </div>
       </header>
+
+      <ConnectionsCard diag={diag} />
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-300">{error}</div>
