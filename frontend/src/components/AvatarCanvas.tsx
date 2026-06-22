@@ -34,6 +34,7 @@ import {
 import { buildMouthInterior, MOUTH_INTERIOR_NAME } from '../lib/mouth-interior'
 import { buildEyeAnatomy, EYE_ANATOMY_NAME } from '../lib/eye-anatomy'
 import { sampleSkinTone } from '../lib/skin-sampling'
+import { estimateFaceLandmarks } from '../lib/face-landmark-estimate'
 import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
@@ -168,6 +169,10 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     guessLandmarks: () => {
       const mesh = faceMeshRef.current
       if (!mesh) return null
+      // Geometry-based estimate: snaps to the real surface + mirrors L/R, so it
+      // works on stylized/drawn humanoids too. Falls back to a bbox guess.
+      const estimated = estimateFaceLandmarks(mesh)
+      if (estimated) return estimated
       const geo = mesh.geometry as THREE.BufferGeometry
       geo.computeBoundingBox()
       const bb = geo.boundingBox
