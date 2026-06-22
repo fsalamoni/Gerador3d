@@ -68,6 +68,7 @@ export async function startGeneration(input: StartGenerationInput): Promise<stri
       mcResolution: typeof extra.mcResolution === 'number' ? extra.mcResolution : undefined,
       seed: typeof extra.seed === 'number' ? extra.seed : undefined,
       backend: typeof extra.backend === 'string' ? extra.backend : undefined,
+      texture: extra.texture === true,
     })
     return gid
   }

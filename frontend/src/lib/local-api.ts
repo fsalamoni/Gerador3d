@@ -22,6 +22,8 @@ export async function localGenerate(input: {
   mcResolution?: number
   seed?: number
   backend?: string
+  /** Apply PBR texture during generation (Hunyuan3D-Paint; needs GPU + modules). */
+  texture?: boolean
 }): Promise<{ jobId: string }> {
   const res = await fetch(`${LOCAL_API}/generate`, {
     method: 'POST',
@@ -34,6 +36,7 @@ export async function localGenerate(input: {
       mcResolution: input.mcResolution ?? 0,
       seed: input.seed ?? -1,
       backend: input.backend ?? '',
+      texture: input.texture ?? false,
     }),
   })
   return asJson(res)

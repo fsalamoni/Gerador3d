@@ -39,8 +39,13 @@ setGlobalOptions({
 
 const TERMINAL = new Set(['succeeded', 'failed', 'canceled'])
 
-function capabilityFor(task: TaskKey): string {
+/** Tasks the proxy understands. `texturing` (PBR on an existing mesh) runs on the
+ * self-hosted worker only; the cloud providers texture inline during generation. */
+type Gen3dTask = TaskKey | 'texturing'
+
+function capabilityFor(task: Gen3dTask): string {
   if (task === 'rigging') return 'rigging'
+  if (task === 'texturing') return 'texturing'
   return task === 'text_to_3d' ? 'text-to-3d' : 'image-to-3d'
 }
 
@@ -105,11 +110,13 @@ export const generate3d = onCall(async (request) => {
 
     const data = request.data as {
       jobId: string
-      task: TaskKey
+      task: Gen3dTask
       modelId: string
       providerId: string
       prompt?: string
       imageDataUrl?: string
+      /** Backend params forwarded to the worker (e.g. { texture, seed, backend }). */
+      extra?: Record<string, unknown>
     }
 
     const { jobId, task, modelId, providerId } = data
@@ -163,33 +170,49 @@ export const generate3d = onCall(async (request) => {
       }
 
       const isRigging = task === 'rigging'
+      const isTexturing = task === 'texturing'
 
-      // Rigging needs a source model URL (passed as `prompt` by the frontend).
+      // Rigging and texturing both act on an EXISTING model whose URL the
+      // frontend passes as `prompt` (same convention).
       const sourceUrl = data.prompt || ''
-      if (isRigging && !sourceUrl) {
+      if ((isRigging || isTexturing) && !sourceUrl) {
         await jobRef.update({
           status: 'failed',
-          error: 'No source model URL provided for rigging.',
+          error: `No source model URL provided for ${task}.`,
           updated_at: new Date().toISOString(),
         })
         void bumpJobTerminal('failed')
-        throw new HttpsError('invalid-argument', 'Missing source model URL for rigging.')
+        throw new HttpsError('invalid-argument', `Missing source model URL for ${task}.`)
       }
 
       // Pre-sign the destination so the worker can upload straight into the
       // user's Storage folder (no service-account key on the worker side).
+      // Texturing returns a textured GLB, like generation.
       const outFile = isRigging ? 'model.vrm' : 'model.glb'
       const uploadUrl = await createWorkerUploadUrl(uid, jobId, outFile)
 
+      // Route + payload. `extra` (texture flag, seed, backend, resolution…) is
+      // forwarded to the worker as `params` — previously it was dropped here, so
+      // the worker's texture/seed options were unreachable from the app.
+      const params = data.extra ?? {}
       const workerEndpoint = isRigging ? `${baseUrl}/api/rig` : `${baseUrl}/api/generate`
       const workerPayload = isRigging
         ? { downloadUrl: sourceUrl, uploadUrl }
-        : {
-            task, // 'image_to_3d' | 'text_to_3d'
-            prompt: data.prompt ?? '',
-            imageDataUrl: data.imageDataUrl ?? '',
-            uploadUrl,
-          }
+        : isTexturing
+          ? {
+              task: 'texture_mesh',
+              meshUrl: sourceUrl, // existing model to texture
+              imageDataUrl: data.imageDataUrl ?? '', // PBR reference image
+              uploadUrl,
+              params,
+            }
+          : {
+              task, // 'image_to_3d' | 'text_to_3d'
+              prompt: data.prompt ?? '',
+              imageDataUrl: data.imageDataUrl ?? '',
+              uploadUrl,
+              params,
+            }
       logger.info('Dispatching to self-hosted worker:', workerEndpoint)
 
       try {
@@ -234,6 +257,16 @@ export const generate3d = onCall(async (request) => {
 
     // Cloud provider dispatch (Meshy / Tripo). The only keyless path is the
     // Meshy rigging mock; every real generation needs the user's BYOK key.
+    // Texturing-as-a-task is self-hosted only (cloud providers texture inline).
+    if (task === 'texturing') {
+      await jobRef.update({
+        status: 'failed',
+        error: 'Texturização avulsa roda no worker local (self-hosted). Use um provedor self-hosted, ou ative a textura durante a geração.',
+        updated_at: new Date().toISOString(),
+      })
+      void bumpJobTerminal('failed')
+      throw new HttpsError('failed-precondition', 'Texturing requires the self-hosted worker.')
+    }
     const { apiKey, baseUrl } = await loadCreds(uid, providerId)
     const keyOptional = providerId === 'meshy' && task === 'rigging'
     if (!keyOptional && !apiKey) {

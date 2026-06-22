@@ -805,6 +805,7 @@ class GenBody(BaseModel):
     foregroundRatio: float = 0.0
     removeBg: bool = True
     seed: int = -1
+    texture: bool = False      # textura PBR na geração (Hunyuan3D-Paint; exige GPU+módulos)
 
 
 class ProvisionBody(BaseModel):
@@ -895,6 +896,8 @@ def create_app(data_dir: Path) -> FastAPI:
             params["foregroundRatio"] = float(body.foregroundRatio)
         if body.seed is not None and body.seed >= 0:
             params["seed"] = int(body.seed)
+        if body.texture:
+            params["texture"] = True
         job["params"]["_imageDataUrl"] = body.imageDataUrl  # transiente
         job["params"]["_imageDataUrls"] = body.imageDataUrls or []  # ângulos extras
         job["params"]["_genParams"] = params
