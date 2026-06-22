@@ -35,6 +35,8 @@ import { buildMouthInterior, MOUTH_INTERIOR_NAME } from '../lib/mouth-interior'
 import { buildEyeAnatomy, EYE_ANATOMY_NAME } from '../lib/eye-anatomy'
 import { sampleSkinTone } from '../lib/skin-sampling'
 import { estimateFaceLandmarks } from '../lib/face-landmark-estimate'
+import { buildHair, HAIR_NAME } from '../lib/hair-anatomy'
+import type { CreaturePreset } from '../lib/creature-presets'
 import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
@@ -61,7 +63,7 @@ export interface AvatarCanvasHandle {
   buildFaceRig: (
     lm: FaceLandmarks,
     gain?: number,
-    parts?: { mouth?: boolean; eyes?: boolean },
+    parts?: { mouth?: boolean; eyes?: boolean; hair?: boolean; preset?: CreaturePreset },
   ) => string[]
   /** Whether a riggable mesh (with vertices) is loaded. */
   hasRiggableMesh: () => boolean
@@ -201,19 +203,25 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       if (!mesh) throw new Error('Nenhuma malha de rosto carregada.')
       const names = buildProceduralMorphs(mesh, lm, gain ?? 1.5)
       // Drop any previously generated anatomy, then (re)build what's requested.
-      for (const name of [MOUTH_INTERIOR_NAME, EYE_ANATOMY_NAME]) {
+      for (const name of [MOUTH_INTERIOR_NAME, EYE_ANATOMY_NAME, HAIR_NAME]) {
         const old = mesh.getObjectByName(name)
         if (old) old.parent?.remove(old)
       }
+      const preset = parts?.preset
       if (parts?.mouth) {
-        const interior = buildMouthInterior(mesh, lm)
+        const interior = buildMouthInterior(mesh, lm, preset?.mouth)
         if (interior) mesh.add(interior)
       }
       if (parts?.eyes) {
-        // Match the eyelids to the model's own skin instead of a neutral tone.
+        // Match the eyelids to the model's own skin instead of a neutral tone;
+        // a creature preset can override pupil shape / iris / eye size.
         const skin = sampleSkinTone(mesh, lm)
-        const eyes = buildEyeAnatomy(mesh, lm, { skinColor: skin.color })
+        const eyes = buildEyeAnatomy(mesh, lm, { skinColor: skin.color, ...(preset?.eye ?? {}) })
         if (eyes) mesh.add(eyes)
+      }
+      if (parts?.hair) {
+        const hair = buildHair(mesh, lm, preset?.hair)
+        if (hair) mesh.add(hair)
       }
       return names
     },

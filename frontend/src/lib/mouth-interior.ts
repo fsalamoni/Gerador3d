@@ -21,12 +21,27 @@ export const MOUTH_INTERIOR_NAME = 'GR3D_MouthInterior'
 /** Per-vertex morph delta in mouth-frame coords (x=right, y=up, z=fwd). */
 type DeltaFn = (x: number, y: number, z: number) => [number, number, number]
 
+export interface MouthOptions {
+  /** Add pointed canine fangs (creatures: feline/canine/reptile). */
+  fangs?: boolean
+  /** Teeth colour (default off-white). */
+  teethColor?: number
+  /** Tongue colour (default pink-red). */
+  tongueColor?: number
+  /** Cavity colour (default near-black). */
+  cavityColor?: number
+}
+
 /**
  * Build the mouth-interior group in `faceMesh`'s local space. Add it as a child
  * of `faceMesh` so it inherits the head transform. Returns null if the mouth
  * landmarks are degenerate.
  */
-export function buildMouthInterior(faceMesh: THREE.Mesh, lm: FaceLandmarks): THREE.Group | null {
+export function buildMouthInterior(
+  faceMesh: THREE.Mesh,
+  lm: FaceLandmarks,
+  opts: MouthOptions = {},
+): THREE.Group | null {
   const pos = (faceMesh.geometry as THREE.BufferGeometry).getAttribute('position') as
     | THREE.BufferAttribute
     | undefined
@@ -45,9 +60,9 @@ export function buildMouthInterior(faceMesh: THREE.Mesh, lm: FaceLandmarks): THR
   group.name = MOUTH_INTERIOR_NAME
   group.userData.gr3dMouthInterior = true
 
-  const cavityMat = new THREE.MeshStandardMaterial({ color: 0x1a0a0a, roughness: 1, metalness: 0, side: THREE.DoubleSide })
-  const teethMat = new THREE.MeshStandardMaterial({ color: 0xf2ece2, roughness: 0.5, metalness: 0 })
-  const tongueMat = new THREE.MeshStandardMaterial({ color: 0xc05a5a, roughness: 0.7, metalness: 0 })
+  const cavityMat = new THREE.MeshStandardMaterial({ color: opts.cavityColor ?? 0x1a0a0a, roughness: 1, metalness: 0, side: THREE.DoubleSide })
+  const teethMat = new THREE.MeshStandardMaterial({ color: opts.teethColor ?? 0xf2ece2, roughness: 0.5, metalness: 0 })
+  const tongueMat = new THREE.MeshStandardMaterial({ color: opts.tongueColor ?? 0xc05a5a, roughness: 0.7, metalness: 0 })
 
   // 1) Dark cavity — a recessed back wall the parted lips reveal.
   {
@@ -89,6 +104,24 @@ export function buildMouthInterior(faceMesh: THREE.Mesh, lm: FaceLandmarks): THR
         'tongue',
       ),
     )
+  }
+  // 5) Fangs (creatures) — pointed canines; upper static, lower drops with jaw.
+  if (opts.fangs) {
+    const fangH = H * 0.55
+    const fangR = Math.max(W * 0.045, H * 0.06)
+    const fx = W * 0.26
+    for (const sx of [-1, 1] as const) {
+      const side = sx < 0 ? 'L' : 'R'
+      const upper = new THREE.ConeGeometry(fangR, fangH, 12)
+      upper.rotateX(Math.PI) // apex points down
+      upper.translate(sx * fx, H * 0.5 - fangH * 0.5, -D * 0.18)
+      group.add(part(upper, basis, rot, [], teethMat, `fangUpper${side}`))
+
+      const lower = new THREE.ConeGeometry(fangR, fangH, 12) // apex up
+      lower.translate(sx * fx, -H * 0.5 + fangH * 0.5, -D * 0.18)
+      const jawDrop: DeltaFn = () => [0, -H * 1.0, 0]
+      group.add(part(lower, basis, rot, [{ name: 'jawOpen', delta: jawDrop }], teethMat, `fangLower${side}`))
+    }
   }
 
   return group

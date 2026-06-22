@@ -19,6 +19,7 @@ import {
   type FaceLandmarks,
   type LandmarkKey,
 } from '../lib/procedural-face-rig'
+import { CREATURE_PRESETS, presetById } from '../lib/creature-presets'
 import { upload3DModel } from '../lib/upload-service'
 
 interface StepDef {
@@ -80,6 +81,8 @@ export default function FaceRigPanel({
   const [gain, setGain] = useState(1.5)
   const [interior, setInterior] = useState(false)
   const [eyes, setEyes] = useState(false)
+  const [hair, setHair] = useState(false)
+  const [presetId, setPresetId] = useState('human')
 
   const ready = REQUIRED.every((k) => marks[k])
 
@@ -133,32 +136,40 @@ export default function FaceRigPanel({
     setError(null)
   }, [avatar])
 
-  const buildWith = useCallback((g: number, withMouth = interior, withEyes = eyes) => {
-    const a = avatar.current
-    if (!a || !ready) return
-    setError(null)
-    try {
-      const lm: FaceLandmarks = {
-        eyeLeft: marks.eyeLeft!,
-        eyeRight: marks.eyeRight!,
-        mouthLeft: marks.mouthLeft!,
-        mouthRight: marks.mouthRight!,
-        upperLip: marks.upperLip!,
-        lowerLip: marks.lowerLip!,
-        ...(marks.browLeft ? { browLeft: marks.browLeft } : {}),
-        ...(marks.browRight ? { browRight: marks.browRight } : {}),
-        ...(marks.jaw ? { jaw: marks.jaw } : {}),
+  const buildWith = useCallback(
+    (g: number, withMouth = interior, withEyes = eyes, withHair = hair, pid = presetId) => {
+      const a = avatar.current
+      if (!a || !ready) return
+      setError(null)
+      try {
+        const lm: FaceLandmarks = {
+          eyeLeft: marks.eyeLeft!,
+          eyeRight: marks.eyeRight!,
+          mouthLeft: marks.mouthLeft!,
+          mouthRight: marks.mouthRight!,
+          upperLip: marks.upperLip!,
+          lowerLip: marks.lowerLip!,
+          ...(marks.browLeft ? { browLeft: marks.browLeft } : {}),
+          ...(marks.browRight ? { browRight: marks.browRight } : {}),
+          ...(marks.jaw ? { jaw: marks.jaw } : {}),
+        }
+        a.buildFaceRig(lm, g, {
+          mouth: withMouth,
+          eyes: withEyes,
+          hair: withHair,
+          preset: presetById(pid),
+        })
+        saveLandmarks(modelUrl, lm)
+        setBuilt(true)
+        setDirty(false)
+        setSaved(false)
+        onBuilt()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Falha ao gerar as expressões.')
       }
-      a.buildFaceRig(lm, g, { mouth: withMouth, eyes: withEyes })
-      saveLandmarks(modelUrl, lm)
-      setBuilt(true)
-      setDirty(false)
-      setSaved(false)
-      onBuilt()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Falha ao gerar as expressões.')
-    }
-  }, [avatar, ready, marks, modelUrl, onBuilt, interior, eyes])
+    },
+    [avatar, ready, marks, modelUrl, onBuilt, interior, eyes, hair, presetId],
+  )
 
   const build = useCallback(() => buildWith(gain), [buildWith, gain])
 
@@ -323,6 +334,49 @@ export default function FaceRigPanel({
           </span>
         </span>
       </label>
+
+      <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={hair}
+          onChange={(e) => {
+            const on = e.target.checked
+            setHair(on)
+            if (built) buildWith(gain, interior, eyes, on, presetId)
+          }}
+          className="mt-0.5 accent-brand-500"
+        />
+        <span className="text-[11px] leading-snug text-slate-300">
+          Criar cabelo <span className="text-slate-500">(calota que acompanha o crânio)</span>
+          <br />
+          <span className="text-[10px] text-slate-500">
+            Aproximação (volume de cabelo, não fios). Cor ajustável no editor de material. Experimental.
+          </span>
+        </span>
+      </label>
+
+      <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 py-2">
+        <label className="text-[11px] leading-snug text-slate-300">
+          Espécie / aparência <span className="text-slate-500">(olhos + boca)</span>
+        </label>
+        <select
+          value={presetId}
+          onChange={(e) => {
+            const pid = e.target.value
+            setPresetId(pid)
+            if (built) buildWith(gain, interior, eyes, hair, pid)
+          }}
+          className="mt-1 w-full rounded-md border border-white/10 bg-slate-800/60 px-2 py-1 text-xs text-slate-100"
+        >
+          {CREATURE_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Humano por padrão. Felino/réptil = pupila em fenda + presas; "olhos grandes" = estilo anime.
+          Afeta os olhos/boca criados acima.
+        </p>
+      </div>
 
       {built && (
         <div className="mt-4 border-t border-white/10 pt-3">

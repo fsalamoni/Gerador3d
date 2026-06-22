@@ -22,7 +22,8 @@ export const EYE_ANATOMY_NAME = 'GR3D_EyeAnatomy'
 const D2R = Math.PI / 180
 
 export interface EyeOptions {
-  /** Eyeball radius as a fraction of the inter-eye distance (default 0.16). */
+  /** Eyeball radius as a fraction of the inter-eye distance (default 0.16).
+   * Creatures (e.g. felines, "big-eye" stylized) use a larger value. */
   radiusFrac?: number
   /** Iris colour (default warm brown). */
   irisColor?: number
@@ -30,6 +31,15 @@ export interface EyeOptions {
    * Accepts a hex or a {@link THREE.Color} (e.g. sampled from the model's skin
    * via {@link sampleSkinTone}). */
   skinColor?: number | THREE.Color
+  /** Iris radius as a fraction of the eyeball radius (default 0.42). */
+  irisFrac?: number
+  /** Pupil radius as a fraction of the eyeball radius (default 0.18). */
+  pupilFrac?: number
+  /** Pupil shape: round (human) or a slit (reptile/feline). Vertical slit =
+   * cat/snake; horizontal = goat/octopus. */
+  pupilShape?: 'round' | 'slit-vertical' | 'slit-horizontal'
+  /** How thin the slit is, as a fraction of the round width (default 0.28). */
+  pupilNarrow?: number
 }
 
 /** Direction on the unit sphere around the front pole (+z=fwd). h=horizontal
@@ -79,12 +89,16 @@ export function buildEyeAnatomy(
     ball.computeVertexNormals()
     addMesh(group, ball, scleraMat, `${side}_eyeball`)
 
-    const iris = new THREE.CircleGeometry(R * 0.42, 24)
+    const iris = new THREE.CircleGeometry(R * (opts.irisFrac ?? 0.42), 24)
     iris.translate(0, 0, R * 0.985)
     iris.applyMatrix4(basis)
     addMesh(group, iris, irisMat, `${side}_iris`)
 
-    const pupil = new THREE.CircleGeometry(R * 0.18, 20)
+    // Pupil: round (human) or a slit (reptile/feline) by squashing one axis.
+    const pupil = new THREE.CircleGeometry(R * (opts.pupilFrac ?? 0.18), 24)
+    const narrow = opts.pupilNarrow ?? 0.28
+    if (opts.pupilShape === 'slit-vertical') pupil.scale(narrow, 1, 1)
+    else if (opts.pupilShape === 'slit-horizontal') pupil.scale(1, narrow, 1)
     pupil.translate(0, 0, R * 0.995)
     pupil.applyMatrix4(basis)
     addMesh(group, pupil, pupilMat, `${side}_pupil`)
