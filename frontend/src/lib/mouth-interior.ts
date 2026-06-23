@@ -89,8 +89,9 @@ export function buildMouthInterior(
     g.scale(1, 0.42, 1.15)
     g.translate(0, -H * 0.32, -D * 0.5)
     const jawDrop: DeltaFn = () => [0, -H * 0.7, 0]
-    // Front of the tongue (z > centre) reaches further out for a natural curl.
-    const stickOut: DeltaFn = (_x, _y, z) => [0, H * 0.15, D * 1.7 + Math.max(0, z) * 1.5]
+    // Front of the tongue (z > centre) reaches a little further for a natural
+    // curl. Kept modest so a full tongueOut peeks past the lips, not a huge slab.
+    const stickOut: DeltaFn = (_x, _y, z) => [0, H * 0.1, D * 0.8 + Math.max(0, z) * 0.8]
     group.add(
       part(
         g,

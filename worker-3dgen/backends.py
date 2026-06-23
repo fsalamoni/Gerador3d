@@ -278,7 +278,12 @@ def _triposr(task, prompt, image_path, out_path, progress, params=None):
     device = "cuda" if cuda_available() else "cpu"
     with torch.no_grad():
         scene_codes = model([image], device=device)
-    meshes = model.extract_mesh(scene_codes, resolution=resolution)
+    # A API do TripoSR mudou: versões novas exigem `has_vertex_color` (posicional).
+    # Suportamos as duas assinaturas (a nova primeiro, com cor de vértice = True).
+    try:
+        meshes = model.extract_mesh(scene_codes, True, resolution=resolution)
+    except TypeError:
+        meshes = model.extract_mesh(scene_codes, resolution=resolution)
 
     if progress:
         progress(88, "exportando GLB")

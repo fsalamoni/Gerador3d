@@ -545,6 +545,15 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     renderer.domElement.addEventListener('pointerup', onPointerUp)
 
     const clock = new THREE.Clock()
+    // Reusable temporaries for per-frame head-pose retargeting (no allocation).
+    const _poseM = new THREE.Matrix4()
+    const _poseQ = new THREE.Quaternion()
+    const _poseP = new THREE.Vector3()
+    const _poseS = new THREE.Vector3()
+    const _poseE = new THREE.Euler()
+    const _tmpE = new THREE.Euler()
+    const _headTgt = new THREE.Quaternion()
+    const _neckTgt = new THREE.Quaternion()
     let raf = 0
     function animate() {
       raf = requestAnimationFrame(animate)
@@ -554,20 +563,30 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
 
       if (vrm) {
         if (frame) applyFaceToVrm(vrm, frame, 0.5)
+        // Head + neck follow the user's head pose (VRM expressions alone don't
+        // move the head). Set the humanoid bones BEFORE vrm.update so it sticks.
+        if (frame?.matrix && frame.matrix.length >= 16) {
+          _poseM.fromArray(frame.matrix)
+          _poseM.decompose(_poseP, _poseQ, _poseS)
+          _poseE.setFromQuaternion(_poseQ, 'YXZ')
+          const head = vrm.humanoid?.getNormalizedBoneNode('head')
+          const neck = vrm.humanoid?.getNormalizedBoneNode('neck')
+          _headTgt.setFromEuler(_tmpE.set(_poseE.x * 0.5, -_poseE.y * 0.5, -_poseE.z * 0.5, 'YXZ'))
+          if (head) head.quaternion.slerp(_headTgt, 0.4)
+          _neckTgt.setFromEuler(_tmpE.set(_poseE.x * 0.25, -_poseE.y * 0.25, -_poseE.z * 0.25, 'YXZ'))
+          if (neck) neck.quaternion.slerp(_neckTgt, 0.4)
+        }
         vrm.update(delta)
         // Also drive raw ARKit morphs directly (works when VRM expression binds
         // are missing, e.g. procedurally-rigged meshes). No-op without them.
         if (frame) applyFaceToGlbMorphs(vrm.scene, frame, 0.5)
       } else if (glbRoot && frame) {
         if (frame.matrix && frame.matrix.length >= 16) {
-          const m = new THREE.Matrix4().fromArray(frame.matrix)
-          const q = new THREE.Quaternion()
-          m.decompose(new THREE.Vector3(), q, new THREE.Vector3())
-          const e = new THREE.Euler().setFromQuaternion(q, 'YXZ')
-          const target = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler(e.x * 0.4, -e.y * 0.4, -e.z * 0.4, 'YXZ'),
-          )
-          glbRoot.quaternion.slerp(target, 0.4)
+          _poseM.fromArray(frame.matrix)
+          _poseM.decompose(_poseP, _poseQ, _poseS)
+          _poseE.setFromQuaternion(_poseQ, 'YXZ')
+          _headTgt.setFromEuler(_tmpE.set(_poseE.x * 0.55, -_poseE.y * 0.55, -_poseE.z * 0.55, 'YXZ'))
+          glbRoot.quaternion.slerp(_headTgt, 0.4)
         }
         applyFaceToGlbMorphs(glbRoot, frame, 0.5)
       } else if (proceduralHead) {

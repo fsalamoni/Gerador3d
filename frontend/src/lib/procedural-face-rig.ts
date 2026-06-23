@@ -163,30 +163,39 @@ export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks, gain 
   const eAmp = eyeR0 * gain // eye displacement unit
   const bAmp = eyeW * 0.18 * gain // brow displacement unit
 
+  // Jaw HINGE: the lower jaw rotates open about an axis behind the head (like a
+  // real mandible), so the mouth OPENS and reveals the interior instead of the
+  // chin stretching. Angle scales mildly with gain and is capped.
+  const hinge = mouthC.clone().addScaledVector(up, faceH * 0.15).addScaledVector(fwd, -faceH * 0.85)
+  const jawAngle = Math.min(0.6, 0.4 * gain)
+  const jawQuat = new THREE.Quaternion().setFromAxisAngle(right, jawAngle)
+
   for (let i = 0; i < n; i++) {
     p.set(pos.getX(i), pos.getY(i), pos.getZ(i))
     const belowMouth = mouthC.clone().sub(p).dot(up) // >0 below mouth line
     const belowUpLip = upLip.clone().sub(p).dot(up) // >0 below the upper lip
 
-    // ── JAW / OPEN ──────────────────────────────────────────────────────────
-    // Mouth opens by dropping the lower lip + chin while the upper lip stays.
+    // ── JAW / OPEN (hinge rotation) ──────────────────────────────────────────
+    // The lower jaw ROTATES open about the hinge (real opening that reveals the
+    // mouth interior: teeth/tongue/cavity), instead of stretching the chin down.
     {
-      let w = 0
+      const ramp = clamp01(belowUpLip / (mouthH * 0.8)) // 0 at/above upper lip → 1 below
+      const localJaw = gauss(p.distanceTo(jawTip), faceH * 1.1) // localize to jaw; fades on neck/torso
+      const wOpen = ramp * localJaw
+      if (wOpen > 1e-4) {
+        tmp.copy(p).sub(hinge).applyQuaternion(jawQuat).add(hinge).sub(p).multiplyScalar(wOpen)
+        add(deltas.jawOpen, i, tmp)
+      }
+      // mouthClose: press the lower lip up toward the upper lip.
       const wLip = gauss(p.distanceTo(loLip), mouthW * 0.6) * clamp01(belowUpLip / (mouthH * 0.5))
-      const wJaw = gauss(p.distanceTo(jawTip), faceH * 1.0) * clamp01(belowMouth / (faceH * 0.5))
-      w = wLip
-      add(deltas.jawOpen, i, tmp.copy(up).multiplyScalar(-(mouthH * 1.6 + faceH * 0.12) * gain * w))
-      add(deltas.jawOpen, i, tmp.copy(fwd).multiplyScalar(-faceH * 0.18 * gain * wJaw))
-      add(deltas.jawOpen, i, tmp.copy(up).multiplyScalar(-faceH * 0.5 * gain * wJaw))
-      // mouthClose: lower lip toward upper lip.
-      add(deltas.mouthClose, i, tmp.copy(up).multiplyScalar(mouthH * 0.7 * gain * wLip))
+      add(deltas.mouthClose, i, tmp.copy(up).multiplyScalar(mouthH * 0.5 * gain * wLip))
     }
-    // jaw sideways / forward (lower face region).
+    // jaw sideways / forward (lower face region) — modest, localized.
     {
       const wj = gauss(p.distanceTo(jawTip), faceH * 1.0) * clamp01(belowMouth / (faceH * 0.4))
-      add(deltas.jawForward, i, tmp.copy(fwd).multiplyScalar(faceH * 0.3 * gain * wj))
-      add(deltas.jawLeft, i, tmp.copy(right).multiplyScalar(-faceH * 0.28 * gain * wj))
-      add(deltas.jawRight, i, tmp.copy(right).multiplyScalar(faceH * 0.28 * gain * wj))
+      add(deltas.jawForward, i, tmp.copy(fwd).multiplyScalar(faceH * 0.18 * gain * wj))
+      add(deltas.jawLeft, i, tmp.copy(right).multiplyScalar(-faceH * 0.18 * gain * wj))
+      add(deltas.jawRight, i, tmp.copy(right).multiplyScalar(faceH * 0.18 * gain * wj))
     }
 
     // ── LIPS / MOUTH SHAPES ─────────────────────────────────────────────────
@@ -249,8 +258,9 @@ export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks, gain 
     radial(deltas.cheekSquintRight, i, p, cheekR, mouthW * 0.5, up, eAmp * 0.5)
     radial(deltas.noseSneerLeft, i, p, nose.clone().addScaledVector(right, -mouthW * 0.2), mouthW * 0.35, up, mAmp * 0.4)
     radial(deltas.noseSneerRight, i, p, nose.clone().addScaledVector(right, mouthW * 0.2), mouthW * 0.35, up, mAmp * 0.4)
-    // tongueOut: approximate — push a small region just inside the lower lip forward+down.
-    radial(deltas.tongueOut, i, p, loLip.clone().addScaledVector(fwd, -mouthW * 0.1), mouthW * 0.3, dir(tmp, fwd, 1, up, -0.3), mAmp * 0.7)
+    // tongueOut: only a faint hint on the surface — the real tongue is the
+    // interior geometry (mouth-interior.ts) that extends out on `tongueOut`.
+    radial(deltas.tongueOut, i, p, loLip.clone().addScaledVector(fwd, -mouthW * 0.05), mouthW * 0.2, dir(tmp, fwd, 1, up, -0.2), mAmp * 0.12)
   }
 
   // Attach as relative morph targets and refresh the mesh.
