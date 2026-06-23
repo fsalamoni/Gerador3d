@@ -84,6 +84,9 @@ export interface AvatarCanvasHandle {
   setPartColor: (part: 'hair' | 'iris', color: string) => void
   /** Geometry-local bounds of the face mesh (for the copilot 2D→3D mapping). */
   getMeshBounds: () => Bounds3 | null
+  /** Snap front-plane landmarks onto the real surface (raycast; keeps the input
+   * point if the ray misses). Used to ground copilot/2D suggestions. */
+  snapLandmarksToSurface: (lm: FaceLandmarks) => FaceLandmarks
 }
 
 interface Props {
@@ -325,6 +328,37 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
         min: { x: bb.min.x, y: bb.min.y, z: bb.min.z },
         max: { x: bb.max.x, y: bb.max.y, z: bb.max.z },
       }
+    },
+    snapLandmarksToSurface: (lm) => {
+      const mesh = faceMeshRef.current
+      const geo = mesh?.geometry as THREE.BufferGeometry | undefined
+      if (!mesh || !geo) return lm
+      mesh.updateWorldMatrix(true, false)
+      if (!geo.boundingBox) geo.computeBoundingBox()
+      const bb = geo.boundingBox
+      if (!bb) return lm
+      const depth = bb.max.z - bb.min.z
+      const rc = raycasterRef.current
+      const quat = mesh.getWorldQuaternion(new THREE.Quaternion())
+      // Cast from in front of the face plane (+z) straight back (−z, local).
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat).normalize()
+      const snap = (p: [number, number, number]): [number, number, number] => {
+        const origin = mesh.localToWorld(new THREE.Vector3(p[0], p[1], bb.max.z + depth * 0.5 + 1e-3))
+        rc.set(origin, dir)
+        const hits = rc.intersectObject(mesh, false)
+        if (!hits.length) return p
+        const l = mesh.worldToLocal(hits[0].point.clone())
+        return [l.x, l.y, l.z]
+      }
+      const out: FaceLandmarks = {
+        eyeLeft: snap(lm.eyeLeft), eyeRight: snap(lm.eyeRight),
+        mouthLeft: snap(lm.mouthLeft), mouthRight: snap(lm.mouthRight),
+        upperLip: snap(lm.upperLip), lowerLip: snap(lm.lowerLip),
+      }
+      if (lm.browLeft) out.browLeft = snap(lm.browLeft)
+      if (lm.browRight) out.browRight = snap(lm.browRight)
+      if (lm.jaw) out.jaw = snap(lm.jaw)
+      return out
     },
   }))
 

@@ -121,10 +121,21 @@ export default function FaceRigPanel({
     }
   }, [activeKey, avatar, built, marks])
 
-  // Seed the material editor from the loaded model's material.
+  // Seed the material editor once the model's material is available. The model
+  // loads asynchronously, so poll briefly instead of reading only on mount.
   useEffect(() => {
-    const info = avatar.current?.getMaterialInfo()
-    if (info) setMat(info)
+    setMat(null)
+    let tries = 0
+    const id = setInterval(() => {
+      const info = avatar.current?.getMaterialInfo()
+      if (info) {
+        setMat(info)
+        clearInterval(id)
+      } else if (++tries > 20) {
+        clearInterval(id)
+      }
+    }, 400)
+    return () => clearInterval(id)
   }, [avatar, modelUrl])
 
   const applyMat = useCallback(

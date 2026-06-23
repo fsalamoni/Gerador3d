@@ -58,7 +58,10 @@ export default function CopilotPhotoButton({
           baseUrl: keys.copilotBaseUrl || undefined,
           model: keys.copilotModel || undefined,
         })
-        onLandmarks(image2DToMeshLandmarks(lm2d, bounds))
+        const front = image2DToMeshLandmarks(lm2d, bounds)
+        // Ground the front-plane suggestions on the real surface (raycast).
+        const snapped = avatar.current?.snapLandmarksToSurface(front) ?? front
+        onLandmarks(snapped)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Falha no copiloto.')
       } finally {
