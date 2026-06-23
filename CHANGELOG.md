@@ -2,6 +2,19 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.4.4 — 2026-06-23 (qualidade da geração 3D: fim do modelo "achatado")
+
+- **Geração 3D saía achatada/disforme** (uma "laje" com a foto colada). Causa: a
+  remoção de fundo (rembg) falhava em silêncio e o TripoSR reconstruía a imagem
+  INTEIRA (com fundo) como um relevo plano. Correções:
+  - o modelo de remoção de fundo (rembg/u2net) agora é **pré-baixado** no
+    provisionamento e cacheado numa pasta **persistente** (U2NET_HOME em APPDATA);
+  - a sessão do rembg é reaproveitada;
+  - se a remoção de fundo falhar, o app agora **avisa com erro claro** (em vez de
+    entregar um modelo achatado silenciosamente).
+- Para muito mais qualidade de geometria, instale e selecione **Hunyuan3D-2mini**
+  (Configuração) — recomendado para a sua GPU.
+
 ## 0.4.3 — 2026-06-23 (boca que abre de verdade + Configuração clara)
 
 - **Boca abre de verdade (não deforma):** o `jawOpen` agora ROTACIONA a mandíbula

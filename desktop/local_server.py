@@ -375,13 +375,13 @@ def _pset(**kw):
         PROVISION.update(kw)
 
 
-def _run(cmd, cwd=None):
+def _run(cmd, cwd=None, env=None, timeout=None):
     _plog("$ " + " ".join(str(c) for c in cmd))
-    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
     for raw in proc.stdout:
         _plog(raw)
-    proc.wait()
+    proc.wait(timeout=timeout) if timeout else proc.wait()
     if proc.returncode != 0:
         raise RuntimeError(f"comando falhou (código {proc.returncode}): {cmd[0]}")
 
@@ -556,6 +556,19 @@ def provision_generation(data_dir: Path):
         _plog("Instalando PyMCubes + rembg (marching cubes sem compilar)...")
         pip("PyMCubes", "rembg", "onnxruntime")
         _pset(progress=85)
+
+        # PRÉ-BAIXA o modelo de remoção de fundo (rembg/u2net) agora, numa pasta
+        # persistente. Sem isso, o download acontece na 1ª geração e, se falhar, o
+        # TripoSR gera um modelo ACHATADO. Aqui temos rede garantida.
+        u2 = str(data_dir / "u2net")
+        try:
+            _plog("Baixando o modelo de remoção de fundo (rembg/u2net, ~170 MB)...")
+            _run([py, "-c", "import rembg; rembg.new_session('u2net')"],
+                 env={**os.environ, "U2NET_HOME": u2}, timeout=600)
+            _plog("Modelo de remoção de fundo pronto.")
+        except Exception as e:  # noqa: BLE001
+            _plog(f"(aviso: pré-download do rembg falhou — tentaremos na 1ª geração: {str(e)[:120]})")
+        _pset(progress=88)
 
         # diffusers (texto→imagem, p/ text_to_3d) é OPCIONAL e conflita com o set
         # travado (exige hf_hub mais novo). Best-effort: se não der, o image_to_3d
@@ -866,6 +879,11 @@ class RigBody(BaseModel):
 def create_app(data_dir: Path) -> FastAPI:
     store = Store(data_dir)
     app = FastAPI(title="Gerador3D Local Engine")
+
+    # Cache do modelo de remoção de fundo (rembg/u2net) numa pasta PERSISTENTE
+    # (APPDATA), reaproveitada entre atualizações. Sem remoção de fundo o TripoSR
+    # gera modelos achatados — então isso é essencial para a qualidade.
+    os.environ.setdefault("U2NET_HOME", str(data_dir / "u2net"))
 
     def spawn(fn, *args):
         threading.Thread(target=fn, args=args, daemon=True).start()

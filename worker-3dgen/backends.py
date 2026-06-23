@@ -19,6 +19,18 @@ import threading
 from pathlib import Path
 
 _MODELS = {}  # cache de modelos carregados por backend
+_REMBG_SESSION = None  # sessão do rembg (remoção de fundo) reutilizada
+
+
+def _get_rembg_session():
+    """Sessão do rembg reaproveitada. O modelo (u2net) é baixado/cacheado em
+    U2NET_HOME (definido pelo motor para uma pasta persistente). Pré-baixado no
+    provisionamento; se faltar, é baixado aqui na 1ª vez."""
+    global _REMBG_SESSION
+    if _REMBG_SESSION is None:
+        import rembg
+        _REMBG_SESSION = rembg.new_session(os.environ.get("REMBG_MODEL", "u2net"))
+    return _REMBG_SESSION
 
 # Importação do torch serializada: a UI chama /diagnostics (checa CUDA) ao mesmo
 # tempo que a geração roda noutra thread; importar torch concorrentemente causa
@@ -257,9 +269,8 @@ def _triposr(task, prompt, image_path, out_path, progress, params=None):
     if remove_bg:
         try:
             import numpy as np
-            import rembg
             from tsr.utils import remove_background, resize_foreground
-            image = remove_background(image, rembg.new_session())
+            image = remove_background(image, _get_rembg_session())
             image = resize_foreground(image, fg_ratio)
             # O TripoSR espera 3 canais (RGB). Após a remoção de fundo a imagem
             # fica RGBA — compomos sobre cinza (como o run.py oficial) para não
@@ -270,8 +281,17 @@ def _triposr(task, prompt, image_path, out_path, progress, params=None):
                 image = Image.fromarray((arr * 255.0).astype("uint8"))
             else:
                 image = image.convert("RGB")
-        except Exception:
-            image = Image.open(image_path).convert("RGB")  # garante 3 canais
+        except Exception as e:  # noqa: BLE001
+            # NUNCA cair em silêncio para a imagem crua: sem remoção de fundo o
+            # TripoSR reconstrói o fundo inteiro e gera um modelo ACHATADO. Falhar
+            # com mensagem clara é melhor do que entregar lixo silenciosamente.
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(
+                "Falha ao remover o fundo da imagem (rembg). Sem isso o TripoSR "
+                "gera um modelo achatado/disforme. Clique em 'Reinstalar / reparar' "
+                "na Configuração (ele baixa o modelo de remoção de fundo) e tente de "
+                "novo. Detalhe: " + str(e)[:200])
 
     if progress:
         progress(60, f"reconstruindo 3D (res {resolution})")
