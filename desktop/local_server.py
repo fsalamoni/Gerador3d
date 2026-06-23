@@ -352,7 +352,10 @@ _HEAL_LOCK = threading.Lock()
 
 TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/main.zip"
 HUNYUAN_ZIP = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
-CUDA_INDEX = os.environ.get("TORCH_CUDA_INDEX", "https://download.pytorch.org/whl/cu121")
+# cu128 = wheels do PyTorch com kernels para GPUs novas (RTX 50xx / Blackwell,
+# sm_120) ALÉM das antigas (Ampere/Ada). O cu121 não tinha sm_120 → nas 50xx dava
+# "no kernel image is available". Override por TORCH_CUDA_INDEX se precisar.
+CUDA_INDEX = os.environ.get("TORCH_CUDA_INDEX", "https://download.pytorch.org/whl/cu128")
 
 
 def _plog(line):
@@ -454,8 +457,15 @@ def ensure_generation_env(data_dir: Path, force=False):
         try:
             _plog("Reparando dependências de geração (transformers/huggingface_hub/numpy)...")
             cons = _write_constraints(data_dir)
+            # Snap-back DETERMINÍSTICO do trio: --force-reinstall --no-deps obriga as
+            # versões EXATAS mesmo quando outro backend (ex.: Hunyuan) subiu o
+            # transformers para uma versão que exige hf_hub novo — a causa do
+            # 'split_torch_state_dict_into_shards'. Sem --no-deps o pip recusava o
+            # downgrade por conflito de dependências e o reparo falhava silenciosamente.
+            _run([py, "-m", "pip", "install", "--no-warn-script-location",
+                  "--force-reinstall", "--no-deps",
+                  "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1"])
             _run([py, "-m", "pip", "install", "--no-warn-script-location", "-c", str(cons),
-                  "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
                   "numpy<2", "safetensors"])
             # Remove módulos possivelmente meio-importados para que o re-import
             # pegue as versões consertadas no mesmo processo.
@@ -496,8 +506,13 @@ def provision_generation(data_dir: Path):
         # Forçá-lo aqui também REPARA um ambiente que tenha sido quebrado por
         # instalações anteriores (hf_hub 1.x / numpy 2.x).
         _plog("Fixando libs compatíveis com o TripoSR (transformers 4.35.0)...")
-        pip("transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
-            "numpy<2", "safetensors", "accelerate")
+        # Trio EXATO primeiro (--force-reinstall --no-deps): garante o downgrade
+        # mesmo se o Hunyuan já tiver subido o transformers. Depois o resto sob
+        # constraints (accelerate pinado p/ não exigir hf_hub novo).
+        _run([py, "-m", "pip", "install", "--no-warn-script-location",
+              "--force-reinstall", "--no-deps",
+              "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1"])
+        pip("numpy<2", "safetensors", "accelerate==0.25.0")
         _pset(progress=55)
 
         tdir = GEN_DIR / "TripoSR"
@@ -575,9 +590,13 @@ def _ensure_torch(py, cons):
         _plog("Instalando PyTorch (CUDA). Isto baixa ~2.5 GB, pode demorar...")
         _run([py, "-m", "pip", "install", "--no-warn-script-location",
               "torch", "torchvision", "--index-url", CUDA_INDEX])
+    # Trio EXATO via --force-reinstall --no-deps (snap-back determinístico), depois
+    # o resto sob constraints — igual ao reparo, p/ não ficar skewed após o Hunyuan.
+    _run([py, "-m", "pip", "install", "--no-warn-script-location",
+          "--force-reinstall", "--no-deps",
+          "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1"])
     _run([py, "-m", "pip", "install", "--no-warn-script-location", "-c", str(cons),
-          "transformers==4.35.0", "huggingface_hub==0.17.3", "tokenizers==0.14.1",
-          "numpy<2", "safetensors", "accelerate"])
+          "numpy<2", "safetensors", "accelerate==0.25.0"])
 
 
 def provision_hunyuan(data_dir: Path):

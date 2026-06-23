@@ -81,9 +81,15 @@ fábrica você liga quando quiser (e só uma vez).
   pagando pouco por geração (~US$0,02–0,40). Bom meio-termo.
 - **O que precisa:** conta + **chave de API** + créditos.
 
+> **Como chegar ao painel de rosto:** menu **Estúdio** → carregue/abra um modelo
+> (pela **Biblioteca** → "Abrir no Estúdio", ou enviando um .vrm) → clique em
+> **"Configurar expressões faciais"**. Abre o painel **"Mapear rosto"**, onde ficam
+> as opções abaixo (e os campos de chave, inline — **não** há página separada de
+> "Provedores" no app desktop).
+
 ### E) ElevenLabs + Audio2Face — *avatar que fala (lip-sync)* 🟢/🟠
-- **O que desbloqueia:** mover a boca do avatar a partir de áudio. Já no Studio
-  (painel **Mapear rosto** → seção "Voz → boca").
+- **O que desbloqueia:** mover a boca do avatar a partir de áudio. No painel
+  **Mapear rosto**, depois de **gerar as expressões**, seção "Voz → boca".
 - **Já funciona sem chave:** botão **"Áudio de um arquivo"** — a boca acompanha o
   volume do áudio (flap por amplitude).
 - **Com chave (ElevenLabs):** digitar um texto → virar voz → mover a boca. Cole a
@@ -92,10 +98,17 @@ fábrica você liga quando quiser (e só uma vez).
 
 ### F) Copiloto de IA (OpenRouter / Groq) — *assistente que entende foto* 🟠
 - **O que desbloqueia:** "ler" uma foto de referência e **sugerir os landmarks**
-  automaticamente, em vez de clicar ponto a ponto. Já no Studio (painel **Mapear
-  rosto** → botão **"Sugerir pontos por foto (IA)"**).
+  automaticamente, em vez de clicar ponto a ponto. No painel **Mapear rosto**,
+  botão **"Sugerir pontos por foto (IA)"**.
 - **O que precisa:** chave da OpenRouter ou Groq (Groq tem cota grátis). Cole no
   ícone de chave ao lado do botão (fica só no seu navegador).
+
+### Aviso importante — TripoSR × Hunyuan3D no mesmo PC
+O **TripoSR** exige `transformers 4.35` e o **Hunyuan3D** exige `transformers` novo —
+versões **incompatíveis** no mesmo ambiente Python. O app prioriza o TripoSR (base
+confiável) e **conserta as versões sozinho** antes de cada geração; se você escolher
+Hunyuan e ele não rodar, o app **cai automaticamente para o TripoSR**. Fazer os dois
+conviverem de verdade exige ambientes Python separados (no roadmap).
 
 ### G) UniRig — *esqueleto de corpo inteiro* 🟠 *(estruturado)*
 - **O que desbloqueia:** rig de **corpo** (ossos + pesos) para humanos e criaturas —

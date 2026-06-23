@@ -54,17 +54,19 @@ export default function ConnectionsCard({ diag }: { diag?: LocalDiagnostics | nu
     {
       name: 'Provedores na nuvem (Tripo / Meshy / fal.ai)',
       status: 'manual',
-      detail: 'Sem GPU? Cole a chave em Configurações → Provedores.',
+      detail: known
+        ? 'No app desktop tudo roda local (GPU acima). Provedores de nuvem são só na versão web.'
+        : 'Sem GPU? Cole a chave nas configurações de provedores (versão web).',
     },
     {
       name: 'Voz → rosto (lip-sync)',
       status: 'manual',
-      detail: 'No painel Mapear rosto: áudio já move a boca sem chave; ElevenLabs precisa de chave.',
+      detail: 'Estúdio → abra um modelo → "Configurar expressões faciais" → gere as expressões. O áudio já move a boca sem chave; ElevenLabs precisa de chave (campo no próprio painel).',
     },
     {
       name: 'Copiloto de IA (foto → pontos)',
       status: 'manual',
-      detail: 'No painel Mapear rosto: "Sugerir pontos por foto". Precisa de chave OpenRouter/Groq.',
+      detail: 'Estúdio → abra um modelo → "Configurar expressões faciais" → "Sugerir pontos por foto". Precisa de chave OpenRouter/Groq (campo no próprio painel).',
     },
   ]
 

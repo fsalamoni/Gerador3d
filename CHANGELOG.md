@@ -2,6 +2,24 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.4.2 — 2026-06-23 (correções de geração + GPU nova + UI)
+
+- **Geração falhava** (`cannot import name 'split_torch_state_dict_into_shards' from
+  'huggingface_hub'`): conflito real — TripoSR exige `transformers 4.35`, mas instalar
+  o Hunyuan3D sobe o `transformers` p/ uma versão que exige `huggingface_hub` novo,
+  deixando o ambiente skewed. O auto-reparo antigo não conseguia rebaixar (o pip
+  recusava por conflito). Agora o trio (`transformers/huggingface_hub/tokenizers`) é
+  fixado com `--force-reinstall --no-deps` (snap-back determinístico) no reparo
+  automático, na instalação e na reafirmação pós-Hunyuan. Se o Hunyuan não rodar, cai
+  para o TripoSR automaticamente.
+- **GPUs novas (RTX 50xx / Blackwell):** PyTorch passa a usar wheels **cu128** (têm
+  kernel sm_120). O cu121 dava "no kernel image" nessas placas. ⚠️ Após atualizar,
+  clique **"Reinstalar geração 3D"** uma vez para baixar o PyTorch compatível.
+- **UI/textos corrigidos:** o app não tem página "Configurações → Provedores" no
+  desktop. O status das ligações e o guia agora apontam o caminho real do painel de
+  rosto: **Estúdio → abrir um modelo → "Configurar expressões faciais"** (chaves de
+  voz/copiloto são inline no próprio painel). Aviso sobre TripoSR × Hunyuan.
+
 ## 0.4.1 — 2026-06-23 (hotfix)
 
 - **Correção crítica de inicialização:** o app desktop não subia (`O motor local não
