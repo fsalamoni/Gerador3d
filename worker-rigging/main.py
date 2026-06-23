@@ -22,7 +22,16 @@ from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
-import unirig  # adaptador UniRig (esqueleto de corpo) — atrás de flag method=unirig
+# Importa o módulo irmão de forma ROBUSTA: quando o motor empacotado carrega este
+# main.py POR CAMINHO (importlib.exec_module), o diretório dele NÃO entra no
+# sys.path e o `import unirig` falha. Garantimos o path e toleramos ausência — o
+# app precisa subir normalmente mesmo sem o UniRig (opcional, exige GPU).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import unirig  # adaptador UniRig (esqueleto de corpo) — flag method=unirig
+except Exception as _unirig_err:  # noqa: BLE001
+    unirig = None
+    print(f"[rigging] UniRig indisponivel: {_unirig_err}", flush=True)
 
 for _s in (sys.stdout, sys.stderr):  # logs UTF-8 (evita cp1252 no Windows)
     try:
@@ -103,6 +112,9 @@ def _set(task_id: str, **kwargs):
 
 def process_unirig(task_id: str, req: RigRequest):
     """Rig de CORPO inteiro via UniRig (saída GLB riggado). Atrás de method=unirig."""
+    if unirig is None:
+        _set(task_id, status="failed", error="UniRig indisponível neste pacote.")
+        return
     _set(task_id, status="in_progress", progress=5, error=None)
     input_path = HERE / f"{task_id}.glb"
     output_path = HERE / f"{task_id}_rigged.glb"
@@ -275,7 +287,7 @@ def health():
         "blender": BLENDER_EXE,
         "blender_found": Path(BLENDER_EXE).exists() or BLENDER_EXE == "blender",
         "template": find_template() or None,
-        "unirig": unirig.available(),
+        "unirig": bool(unirig and unirig.available()),
     }
 
 

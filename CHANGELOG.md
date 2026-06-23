@@ -2,6 +2,15 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.4.1 — 2026-06-23 (hotfix)
+
+- **Correção crítica de inicialização:** o app desktop não subia (`O motor local não
+  iniciou` → `ModuleNotFoundError: No module named 'unirig'`). O motor empacotado
+  carrega o `worker-rigging/main.py` por caminho (importlib `exec_module`), o que
+  **não** coloca o diretório no `sys.path`; o `import unirig` falhava e derrubava o
+  motor. Agora o diretório é garantido no `sys.path` e o import é tolerante a ausência
+  (o app sobe normalmente mesmo sem o UniRig, que é opcional e exige GPU).
+
 ## 0.4.0 — 2026-06-23
 
 ### Funciona sem ligar nada (geometria/UI, testado aqui)
