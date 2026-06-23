@@ -18,6 +18,7 @@ import {
   type LocalDiagnostics, type ProvisionStatus,
 } from '../lib/local-api'
 import ConnectionsCard from '../components/ConnectionsCard'
+import AiKeysCard from '../components/AiKeysCard'
 
 const BACKEND_LABELS: Record<string, string> = {
   triposr: 'TripoSR',
@@ -77,9 +78,9 @@ export default function SetupPage() {
     return (
       <div className="mx-auto max-w-3xl py-10">
         <ConnectionsCard diag={null} />
+        <AiKeysCard />
         <p className="mt-4 text-center text-sm text-slate-400">
           A instalação de recursos locais (GPU, Blender) é exclusiva do aplicativo desktop.
-          No modo web, use provedores na nuvem (Configurações → Provedores).
         </p>
       </div>
     )
@@ -152,7 +153,10 @@ export default function SetupPage() {
             <div>
               <h2 className="font-semibold text-white">Geração 3D por IA (texto/imagem → 3D)</h2>
               <p className="mt-1 text-sm text-slate-400">
-                Roda modelos open-source (TripoSR) na sua GPU. Requer placa NVIDIA.
+                Roda modelos open-source na sua GPU (placa NVIDIA). Instale na ordem:
+                <b className="text-slate-200"> 1) Geração 3D</b> (PyTorch + TripoSR, obrigatório) e,
+                se quiser muito mais qualidade,
+                <b className="text-slate-200"> 2) Hunyuan3D-2mini</b> (opcional).
               </p>
               <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-300">
                 <span className="flex items-center gap-1.5"><Dot ok={!!gen?.torch} /> PyTorch</span>
@@ -216,13 +220,19 @@ export default function SetupPage() {
         <button
           disabled={busy}
           onClick={() => install('generation')}
-          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500 disabled:opacity-50"
+          className={`mt-4 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50 ${
+            gen?.ready
+              ? 'border border-white/15 text-slate-300 hover:bg-white/5'
+              : 'bg-brand-600 text-white hover:bg-brand-500'
+          }`}
         >
           <Download className="h-4 w-4" />
-          {gen?.ready ? 'Reinstalar geração 3D' : 'Instalar geração 3D na minha GPU'}
+          {gen?.ready ? 'Reinstalar / reparar (só se der erro)' : '1) Instalar geração 3D (PyTorch + TripoSR)'}
         </button>
         <p className="mt-2 text-xs text-slate-500">
-          Baixa ~2,5 GB (PyTorch) + o modelo. Pode levar vários minutos.
+          {gen?.ready
+            ? 'Já instalado ✓ — fica salvo. O app repara o ambiente sozinho ao abrir; só reinstale se a geração falhar.'
+            : 'Baixa ~2,5 GB (PyTorch) + o modelo. Pode levar vários minutos. Você só faz isso uma vez.'}
         </p>
 
         {/* Upgrade de qualidade: Hunyuan3D-2mini (geometria PBR) */}
@@ -247,11 +257,13 @@ export default function SetupPage() {
               className="mt-3 inline-flex items-center gap-2 rounded-lg border border-fuchsia-500/40 bg-fuchsia-600/15 px-4 py-2 text-sm font-semibold text-fuchsia-100 transition hover:bg-fuchsia-600/25 disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
-              {gen?.hunyuan ? 'Reinstalar Hunyuan3D-2mini' : 'Instalar Hunyuan3D-2mini'}
+              {gen?.hunyuan ? '✓ Instalado — reinstalar só se der erro' : '2) Instalar Hunyuan3D-2mini (opcional)'}
             </button>
           </div>
         )}
       </section>
+
+      <AiKeysCard />
 
       {/* PROGRESSO AO VIVO */}
       {prov && (prov.active || prov.done) && (

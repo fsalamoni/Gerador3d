@@ -61,12 +61,12 @@ export default function ConnectionsCard({ diag }: { diag?: LocalDiagnostics | nu
     {
       name: 'Voz → rosto (lip-sync)',
       status: 'manual',
-      detail: 'Estúdio → abra um modelo → "Configurar expressões faciais" → gere as expressões. O áudio já move a boca sem chave; ElevenLabs precisa de chave (campo no próprio painel).',
+      detail: 'Estúdio → abrir modelo → "Configurar expressões faciais". O áudio já move a boca SEM chave; "falar texto" usa ElevenLabs (chave na seção "Chaves de IA" abaixo).',
     },
     {
       name: 'Copiloto de IA (foto → pontos)',
       status: 'manual',
-      detail: 'Estúdio → abra um modelo → "Configurar expressões faciais" → "Sugerir pontos por foto". Precisa de chave OpenRouter/Groq (campo no próprio painel).',
+      detail: 'Estúdio → "Configurar expressões faciais" → "Sugerir pontos por foto". Precisa de chave OpenRouter/Groq (seção "Chaves de IA" abaixo).',
     },
   ]
 

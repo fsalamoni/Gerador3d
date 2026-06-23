@@ -2,6 +2,28 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.4.3 — 2026-06-23 (boca que abre de verdade + Configuração clara)
+
+- **Boca abre de verdade (não deforma):** o `jawOpen` agora ROTACIONA a mandíbula
+  inferior numa dobradiça atrás da cabeça — a boca abre e revela o interior
+  (dentes/cavidade/língua), em vez de esticar o queixo. Lábio superior fica parado;
+  nada acima dos olhos se mexe. Ângulo limitado (≤34°).
+- **Sem exagero:** queixo (jawForward/Left/Right) ~40% menor; `tongueOut` da superfície
+  virou um leve indício; a língua interior parou de virar um "slab" gigante (D*1.7→D*0.8).
+- **Pescoço:** o VRM agora move cabeça + pescoço conforme sua pose (antes só expressões).
+- **Geração 3D:** corrige `TSR.extract_mesh() missing ... 'has_vertex_color'` (duas APIs do TripoSR).
+- **Configuração refeita:** seções separadas com o que está instalado (✓) e o que falta,
+  ordem de instalação (1) Geração 3D → 2) Hunyuan opcional), e botões idempotentes
+  (“já instalado fica salvo; só reinstale se der erro”).
+- **Chaves de IA (voz/copiloto):** nova seção em Configuração para colar as chaves de
+  ElevenLabs e OpenRouter/Groq (antes não havia lugar para isso).
+
+### Limitação honesta (ainda em aberto)
+- Os pacotes pip (PyTorch etc.) instalam dentro da pasta do app, que é trocada ao
+  atualizar — então hoje pode ser preciso reinstalar a geração após atualizar. A
+  correção (instalar num local persistente) é uma mudança de motor que farei com
+  cuidado/validação para não quebrar a geração.
+
 ## 0.4.2 — 2026-06-23 (correções de geração + GPU nova + UI)
 
 - **Geração falhava** (`cannot import name 'split_torch_state_dict_into_shards' from
