@@ -56,8 +56,16 @@ export default function ConnectionsCard({ diag }: { diag?: LocalDiagnostics | nu
       status: 'manual',
       detail: 'Sem GPU? Cole a chave em Configurações → Provedores.',
     },
-    { name: 'Voz → rosto (lip-sync)', status: 'soon', detail: 'ElevenLabs + Audio2Face (roadmap).' },
-    { name: 'Copiloto de IA (foto → pontos)', status: 'soon', detail: 'OpenRouter / Groq (roadmap).' },
+    {
+      name: 'Voz → rosto (lip-sync)',
+      status: 'manual',
+      detail: 'No painel Mapear rosto: áudio já move a boca sem chave; ElevenLabs precisa de chave.',
+    },
+    {
+      name: 'Copiloto de IA (foto → pontos)',
+      status: 'manual',
+      detail: 'No painel Mapear rosto: "Sugerir pontos por foto". Precisa de chave OpenRouter/Groq.',
+    },
   ]
 
   return (

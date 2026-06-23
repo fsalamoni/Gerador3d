@@ -37,6 +37,7 @@ import { sampleSkinTone } from '../lib/skin-sampling'
 import { estimateFaceLandmarks } from '../lib/face-landmark-estimate'
 import { buildHair, HAIR_NAME } from '../lib/hair-anatomy'
 import type { CreaturePreset } from '../lib/creature-presets'
+import type { Bounds3 } from '../lib/copilot-client'
 import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
@@ -81,6 +82,8 @@ export interface AvatarCanvasHandle {
   setMaterial: (props: { color?: string; metalness?: number; roughness?: number }) => void
   /** Recolour a generated anatomy part (hair / iris); color is #rrggbb sRGB. */
   setPartColor: (part: 'hair' | 'iris', color: string) => void
+  /** Geometry-local bounds of the face mesh (for the copilot 2D→3D mapping). */
+  getMeshBounds: () => Bounds3 | null
 }
 
 interface Props {
@@ -310,6 +313,18 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
           if ((mm as THREE.MeshStandardMaterial).color) (mm as THREE.MeshStandardMaterial).color.set(color)
         }
       })
+    },
+    getMeshBounds: () => {
+      const mesh = faceMeshRef.current
+      const geo = mesh?.geometry as THREE.BufferGeometry | undefined
+      if (!geo) return null
+      if (!geo.boundingBox) geo.computeBoundingBox()
+      const bb = geo.boundingBox
+      if (!bb) return null
+      return {
+        min: { x: bb.min.x, y: bb.min.y, z: bb.min.z },
+        max: { x: bb.max.x, y: bb.max.y, z: bb.max.z },
+      }
     },
   }))
 

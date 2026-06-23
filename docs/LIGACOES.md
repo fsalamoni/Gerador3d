@@ -81,21 +81,21 @@ fábrica você liga quando quiser (e só uma vez).
   pagando pouco por geração (~US$0,02–0,40). Bom meio-termo.
 - **O que precisa:** conta + **chave de API** + créditos.
 
-### E) ElevenLabs + Audio2Face — *avatar que fala (lip-sync)* 🟠 *(estruturado)*
-- **O que desbloqueia:** digitar um texto → virar voz → mover a boca do avatar
-  automaticamente (reaproveita a boca que já criamos).
-- **O que precisa:** chave da ElevenLabs (voz). Para lip-sync preciso por fonema,
-  o modelo Audio2Face/NeuroSync (aberto, NVIDIA).
-- **Status:** **estruturado no código** (`lib/lipsync.ts`): o "flap" da boca por
-  amplitude de áudio **já funciona sem chave**; a voz ElevenLabs entra ao colar a
-  chave; Audio2Face é o upgrade de qualidade. Falta só a UI de "falar".
+### E) ElevenLabs + Audio2Face — *avatar que fala (lip-sync)* 🟢/🟠
+- **O que desbloqueia:** mover a boca do avatar a partir de áudio. Já no Studio
+  (painel **Mapear rosto** → seção "Voz → boca").
+- **Já funciona sem chave:** botão **"Áudio de um arquivo"** — a boca acompanha o
+  volume do áudio (flap por amplitude).
+- **Com chave (ElevenLabs):** digitar um texto → virar voz → mover a boca. Cole a
+  chave no ícone de chave ao lado do campo "Falar um texto".
+- **Upgrade futuro:** lip-sync preciso por fonema = Audio2Face/NeuroSync (aberto, NVIDIA).
 
-### F) Copiloto de IA (OpenRouter / Groq) — *assistente que entende foto* 🟠 *(estruturado)*
+### F) Copiloto de IA (OpenRouter / Groq) — *assistente que entende foto* 🟠
 - **O que desbloqueia:** "ler" uma foto de referência e **sugerir os landmarks**
-  automaticamente, em vez de clicar ponto a ponto.
-- **O que precisa:** chave da OpenRouter ou Groq (Groq tem cota grátis).
-- **Status:** **estruturado no código** (`lib/copilot-client.ts`): chamada de visão +
-  parser dos pontos prontos e testados. Falta só colar a chave e o botão na UI.
+  automaticamente, em vez de clicar ponto a ponto. Já no Studio (painel **Mapear
+  rosto** → botão **"Sugerir pontos por foto (IA)"**).
+- **O que precisa:** chave da OpenRouter ou Groq (Groq tem cota grátis). Cole no
+  ícone de chave ao lado do botão (fica só no seu navegador).
 
 ### G) UniRig — *esqueleto de corpo inteiro* 🟠 *(estruturado)*
 - **O que desbloqueia:** rig de **corpo** (ossos + pesos) para humanos e criaturas —

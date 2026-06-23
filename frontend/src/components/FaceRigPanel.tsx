@@ -21,6 +21,8 @@ import {
 } from '../lib/procedural-face-rig'
 import { CREATURE_PRESETS, presetById } from '../lib/creature-presets'
 import { upload3DModel } from '../lib/upload-service'
+import CopilotPhotoButton from './CopilotPhotoButton'
+import VoiceLipSync from './VoiceLipSync'
 
 interface StepDef {
   key: LandmarkKey
@@ -142,6 +144,16 @@ export default function FaceRigPanel({
     setError('Estimativa aplicada — gire o modelo e corrija qualquer ponto fora do lugar clicando nele.')
   }, [avatar, built])
 
+  const applyCopilotLandmarks = useCallback(
+    (lm: FaceLandmarks) => {
+      setMarks(lm as Marks)
+      setActiveKey(null)
+      if (built) setDirty(true)
+      setError('Pontos sugeridos pela IA — gire o modelo e ajuste o que estiver fora do lugar.')
+    },
+    [built],
+  )
+
   const reset = useCallback(() => {
     avatar.current?.clearMarkers()
     avatar.current?.clearPreview()
@@ -252,6 +264,8 @@ export default function FaceRigPanel({
       >
         <Wand2 className="h-3.5 w-3.5" /> Estimar pontos automaticamente
       </button>
+
+      <CopilotPhotoButton avatar={avatar} onLandmarks={applyCopilotLandmarks} />
 
       <ol className="mt-3 space-y-1.5">
         {STEPS.map((s) => {
@@ -492,6 +506,8 @@ export default function FaceRigPanel({
             <TestBtn label="Queixo p/ lado" onDown={() => preview('jawLeft', 1)} onUp={() => preview('jawLeft', 0)} />
             <TestBtn label="Língua" onDown={() => preview('tongueOut', 1)} onUp={() => preview('tongueOut', 0)} />
           </div>
+
+          <VoiceLipSync avatar={avatar} />
 
           <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Exportar avatar (com expressões)</p>
           <div className="grid grid-cols-2 gap-2">
