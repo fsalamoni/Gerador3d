@@ -48,6 +48,42 @@ GEN_DIR = ROOT / "worker-3dgen"
 DIST = ROOT / "frontend" / "dist-local"                 # build local da SPA
 
 
+def _repos_dir() -> Path:
+    """Onde os repositórios de modelo (TripoSR/Hunyuan) são extraídos. No app
+    empacotado, GR3D_GEN_REPOS aponta para uma pasta GRAVÁVEL (%APPDATA%); em dev,
+    cai para GEN_DIR (ao lado do código)."""
+    env = os.environ.get("GR3D_GEN_REPOS")
+    return Path(env) if env else GEN_DIR
+
+
+def _setup_writable_env(data_dir: Path) -> None:
+    """Direciona TODA instalação Python para uma pasta GRAVÁVEL e PERSISTENTE em
+    %APPDATA% (data_dir), em vez do Python embutido em resources/ (somente-leitura
+    em Program Files → 'Instalar Geração 3D' falhava para usuário comum; e era
+    apagado a cada atualização → exigia reinstalar). Centralizado via PIP_TARGET:
+      - pip install (qualquer chamada, subprocess) grava em data_dir/pylibs;
+      - PYTHONPATH garante que subprocessos python (selftest/rembg) importem de lá;
+      - sys.path do processo do motor importa de lá em tempo de execução;
+      - GR3D_GEN_REPOS: repositórios de modelo extraídos numa pasta gravável.
+    Retrocompatível: o que já estava instalado em resources continua no sys.path
+    padrão; só instalações NOVAS passam a ir para pylibs.
+    """
+    pylibs = data_dir / "pylibs"
+    repos = data_dir / "repos"
+    for d in (pylibs, repos):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    if str(pylibs) not in sys.path:
+        sys.path.insert(0, str(pylibs))
+    os.environ["PIP_TARGET"] = str(pylibs)          # todo pip install → pylibs
+    prev = os.environ.get("PYTHONPATH", "")
+    parts = [str(pylibs)] + ([prev] if prev else [])
+    os.environ["PYTHONPATH"] = os.pathsep.join(parts)  # subprocessos importam de pylibs
+    os.environ.setdefault("GR3D_GEN_REPOS", str(repos))
+
+
 def _load(name, path):
     spec = importlib.util.spec_from_file_location(name, str(path))
     mod = importlib.util.module_from_spec(spec)
@@ -557,14 +593,19 @@ def provision_generation(data_dir: Path):
         pip("numpy<2", "safetensors", "accelerate==0.25.0")
         _pset(progress=55)
 
-        tdir = GEN_DIR / "TripoSR"
+        repos = _repos_dir()
+        repos.mkdir(parents=True, exist_ok=True)
+        tdir = repos / "TripoSR"
+        if not tdir.exists() and (GEN_DIR / "TripoSR").exists():
+            tdir = GEN_DIR / "TripoSR"  # já instalado no layout antigo (dev/legado)
         if not tdir.exists():
             _plog("Baixando TripoSR (modelo open-source, MIT)...")
             zpath = data_dir / "triposr.zip"
             _download(TRIPOSR_ZIP, zpath, "TripoSR")
             with zipfile.ZipFile(zpath) as z:
-                z.extractall(GEN_DIR)
-            extracted = GEN_DIR / "TripoSR-main"
+                z.extractall(repos)
+            extracted = repos / "TripoSR-main"
+            tdir = repos / "TripoSR"
             if extracted.exists():
                 extracted.rename(tdir)
             try:
@@ -670,14 +711,19 @@ def provision_hunyuan(data_dir: Path):
         _ensure_torch(py, cons)
         _pset(progress=40)
 
-        hdir = GEN_DIR / "Hunyuan3D-2"
+        repos = _repos_dir()
+        repos.mkdir(parents=True, exist_ok=True)
+        hdir = repos / "Hunyuan3D-2"
+        if not (hdir / "hy3dgen").exists() and (GEN_DIR / "Hunyuan3D-2" / "hy3dgen").exists():
+            hdir = GEN_DIR / "Hunyuan3D-2"  # layout antigo (dev/legado)
         if not (hdir / "hy3dgen").exists():
             _plog("Baixando o repositório Hunyuan3D-2 (código do pipeline)...")
             zpath = data_dir / "hunyuan3d2.zip"
             _download(HUNYUAN_ZIP, zpath, "Hunyuan3D-2")
             with zipfile.ZipFile(zpath) as z:
-                z.extractall(GEN_DIR)
-            extracted = GEN_DIR / "Hunyuan3D-2-main"
+                z.extractall(repos)
+            extracted = repos / "Hunyuan3D-2-main"
+            hdir = repos / "Hunyuan3D-2"
             if extracted.exists():
                 if hdir.exists():
                     shutil.rmtree(hdir, ignore_errors=True)
@@ -782,12 +828,19 @@ def provision_blender(data_dir: Path):
         subprocess.run([str(blender_exe), "-b", "-P", str(RIG_DIR / "install_vrm_addon.py")],
                        env=env, timeout=600)
         _plog("Gerando o template facial...")
+        # Grava o template numa pasta GRAVÁVEL (data_dir); RIG_DIR fica em
+        # resources/ (somente-leitura no app empacotado). find_template honra
+        # RIG_TEMPLATE_PATH, salvo no engine_config para o rig_script usar.
+        tmpl_out = data_dir / "template_face.glb"
         subprocess.run([str(blender_exe), "-b", "-P", str(RIG_DIR / "make_template.py"),
-                        "--", "--out", str(RIG_DIR / "template_face.glb")], env=env, timeout=600)
+                        "--", "--out", str(tmpl_out)], env=env, timeout=600)
 
         cfg = data_dir / "engine_config.json"
-        cfg.write_text(json.dumps({"blender": str(blender_exe),
-                                   "blender_user_scripts": str(scripts)}), "utf-8")
+        cfg_data = {"blender": str(blender_exe), "blender_user_scripts": str(scripts)}
+        if tmpl_out.exists() and tmpl_out.stat().st_size > 0:
+            cfg_data["template"] = str(tmpl_out)
+            os.environ["RIG_TEMPLATE_PATH"] = str(tmpl_out)
+        cfg.write_text(json.dumps(cfg_data), "utf-8")
         _pset(progress=100, ok=True)
         _plog("Blender provisionado com sucesso! Rigging pronto.")
     except Exception as e:  # noqa: BLE001
@@ -864,8 +917,10 @@ def gpu_info_cached():
 
 
 def _hunyuan_installed() -> bool:
-    """Hunyuan3D-2mini disponível (repo local ou pacote no ambiente)."""
-    return ((GEN_DIR / "Hunyuan3D-2" / "hy3dgen").exists()
+    """Hunyuan3D-2mini disponível (repo no diretório gravável OU no antigo, ou
+    pacote no ambiente)."""
+    return ((_repos_dir() / "Hunyuan3D-2" / "hy3dgen").exists()
+            or (GEN_DIR / "Hunyuan3D-2" / "hy3dgen").exists()
             or importlib.util.find_spec("hy3dgen") is not None)
 
 
@@ -874,7 +929,8 @@ def diagnostics(data_dir: Path):
     template = rigmod.find_template()
     torch_ok = importlib.util.find_spec("torch") is not None
     diffusers_ok = importlib.util.find_spec("diffusers") is not None
-    triposr_ok = (GEN_DIR / "TripoSR").exists() or importlib.util.find_spec("tsr") is not None
+    triposr_ok = ((_repos_dir() / "TripoSR").exists() or (GEN_DIR / "TripoSR").exists()
+                  or importlib.util.find_spec("tsr") is not None)
     hunyuan_ok = _hunyuan_installed()
     gpu = gpu_info_cached() if torch_ok else {"name": "", "vramGb": 0.0, "cuda": False}
     recommended = genbackends.recommend_backend(gpu.get("vramGb", 0.0))
@@ -963,6 +1019,20 @@ def create_app(data_dir: Path) -> FastAPI:
     store = Store(data_dir)
     app = FastAPI(title="Gerador3D Local Engine")
 
+    # Instala/persiste pacotes Python e repositórios de modelo numa pasta GRAVÁVEL
+    # (%APPDATA%), não no resources/ somente-leitura. Resolve "instalar falha em
+    # Program Files" e "reinstalar após atualizar".
+    _setup_writable_env(data_dir)
+    # Se um template facial foi provisionado numa pasta gravável, honra-o (RIG_DIR
+    # é somente-leitura no app empacotado).
+    try:
+        _cfg = data_dir / "engine_config.json"
+        if _cfg.exists():
+            _t = json.loads(_cfg.read_text("utf-8")).get("template")
+            if _t and Path(_t).exists():
+                os.environ.setdefault("RIG_TEMPLATE_PATH", _t)
+    except Exception:
+        pass
     # Cache do modelo de remoção de fundo (rembg/u2net) numa pasta PERSISTENTE
     # (APPDATA), reaproveitada entre atualizações. Sem remoção de fundo o TripoSR
     # gera modelos achatados — então isso é essencial para a qualidade.

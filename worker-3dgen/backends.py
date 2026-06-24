@@ -79,13 +79,22 @@ def get_torch():
 
 
 def _ensure_local_repo_on_path(*names):
-    """Adiciona repositórios clonados localmente (ex.: TripoSR) ao sys.path,
-    para que `from tsr.system import TSR` funcione após o setup."""
-    here = Path(__file__).resolve().parent
+    """Adiciona repositórios clonados localmente (ex.: TripoSR) ao sys.path, para
+    que `from tsr.system import TSR` funcione após o setup. Procura primeiro no
+    diretório de dados GRAVÁVEL (GR3D_GEN_REPOS, ex.: %APPDATA%/Gerador3D/repos —
+    onde o app empacotado extrai), depois ao lado deste arquivo (modo dev)."""
+    roots = []
+    env = os.environ.get("GR3D_GEN_REPOS")
+    if env:
+        roots.append(Path(env))
+    roots.append(Path(__file__).resolve().parent)
     for name in names:
-        cand = here / name
-        if cand.exists() and str(cand) not in sys.path:
-            sys.path.insert(0, str(cand))
+        for root in roots:
+            cand = root / name
+            if cand.exists():
+                if str(cand) not in sys.path:
+                    sys.path.insert(0, str(cand))
+                break
 
 
 def cuda_available() -> bool:
