@@ -23,7 +23,7 @@ import {
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { VRMLoaderPlugin, type VRM } from '@pixiv/three-vrm'
+import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import type { FaceFrame } from '../lib/face-tracking'
 import { applyFaceToProcedural, applyFaceToVrm, applyFaceToGlbMorphs } from '../lib/avatar-mapping'
 import {
@@ -137,6 +137,23 @@ function firstStandardMaterial(mesh: THREE.Mesh | null): THREE.MeshStandardMater
   return found
 }
 
+/** Dispose every geometry, material and texture under `root` (free GPU memory). */
+function disposeObject3D(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const m = o as THREE.Mesh
+    ;(m.geometry as THREE.BufferGeometry | undefined)?.dispose?.()
+    const mat = m.material as THREE.Material | THREE.Material[] | undefined
+    if (!mat) return
+    for (const mm of Array.isArray(mat) ? mat : [mat]) {
+      for (const k in mm) {
+        const v = (mm as unknown as Record<string, unknown>)[k]
+        if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose()
+      }
+      mm.dispose?.()
+    }
+  })
+}
+
 function meshHasArkitMorphs(root: THREE.Object3D): boolean {
   let has = false
   root.traverse((o) => {
@@ -185,13 +202,13 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     clearMarkers: () => {
       const group = markersRef.current
       if (!group) return
-      for (const c of [...group.children]) group.remove(c)
+      for (const c of [...group.children]) { disposeObject3D(c); group.remove(c) }
     },
     setMarkers: (points) => {
       const group = markersRef.current
       const mesh = faceMeshRef.current
       if (!group) return
-      for (const c of [...group.children]) group.remove(c)
+      for (const c of [...group.children]) { disposeObject3D(c); group.remove(c) }
       if (!mesh) return
       mesh.updateWorldMatrix(true, false)
       const r = markerRadius(rootRef.current)
@@ -555,6 +572,13 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     }
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
     renderer.domElement.addEventListener('pointerup', onPointerUp)
+    // Stop the render loop if the GPU context is lost (avoids console spam /
+    // wasted work rendering to a dead context).
+    const onContextLost = (e: Event) => {
+      e.preventDefault()
+      cancelAnimationFrame(raf)
+    }
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost)
 
     const clock = new THREE.Clock()
     // Reusable temporaries for per-frame head-pose retargeting (no allocation).
@@ -565,7 +589,6 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
     const _poseE = new THREE.Euler()
     const _tmpE = new THREE.Euler()
     const _headTgt = new THREE.Quaternion()
-    const _neckTgt = new THREE.Quaternion()
     let raf = 0
     function animate() {
       raf = requestAnimationFrame(animate)
@@ -574,20 +597,9 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       controls?.update()
 
       if (vrm) {
+        // applyFaceToVrm owns BOTH expressions AND head/neck pose (single owner —
+        // don't rotate the head bones here too, or the two fight and jitter).
         if (frame) applyFaceToVrm(vrm, frame, 0.5)
-        // Head + neck follow the user's head pose (VRM expressions alone don't
-        // move the head). Set the humanoid bones BEFORE vrm.update so it sticks.
-        if (frame?.matrix && frame.matrix.length >= 16) {
-          _poseM.fromArray(frame.matrix)
-          _poseM.decompose(_poseP, _poseQ, _poseS)
-          _poseE.setFromQuaternion(_poseQ, 'YXZ')
-          const head = vrm.humanoid?.getNormalizedBoneNode('head')
-          const neck = vrm.humanoid?.getNormalizedBoneNode('neck')
-          _headTgt.setFromEuler(_tmpE.set(_poseE.x * 0.5, -_poseE.y * 0.5, -_poseE.z * 0.5, 'YXZ'))
-          if (head) head.quaternion.slerp(_headTgt, 0.4)
-          _neckTgt.setFromEuler(_tmpE.set(_poseE.x * 0.25, -_poseE.y * 0.25, -_poseE.z * 0.25, 'YXZ'))
-          if (neck) neck.quaternion.slerp(_neckTgt, 0.4)
-        }
         vrm.update(delta)
         // Also drive raw ARKit morphs directly (works when VRM expression binds
         // are missing, e.g. procedurally-rigged meshes). No-op without them.
@@ -624,7 +636,15 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       resizeObserver.disconnect()
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
       renderer.domElement.removeEventListener('pointerup', onPointerUp)
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost)
       controls?.dispose()
+      // Free GPU resources of the loaded model(s) — without this, every model
+      // switch / rig-mode toggle (this effect's deps) leaks geometries, materials
+      // and textures until the GPU context is lost.
+      if (vrm) {
+        try { VRMUtils.deepDispose(vrm.scene) } catch { /* ignore */ }
+      }
+      disposeObject3D(scene)
       renderer.dispose()
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement)

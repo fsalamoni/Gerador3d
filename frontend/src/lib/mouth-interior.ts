@@ -70,16 +70,17 @@ export function buildMouthInterior(
     g.translate(0, 0, -D * 0.85)
     group.add(part(g, basis, rot, [], cavityMat, 'cavity'))
   }
-  // 2) Upper teeth — static white strip just inside the upper lip.
+  // 2) Upper teeth — static white strip, recessed well behind the lip plane so
+  //    it doesn't poke through thin/stylized lips when the mouth is closed.
   {
     const g = new THREE.BoxGeometry(W * 0.72, H * 0.34, D * 0.3)
-    g.translate(0, H * 0.5, -D * 0.22)
+    g.translate(0, H * 0.5, -D * 0.36)
     group.add(part(g, basis, rot, [], teethMat, 'upperTeeth'))
   }
-  // 3) Lower teeth — drop with the jaw.
+  // 3) Lower teeth — drop with the jaw (also recessed behind the lips).
   {
     const g = new THREE.BoxGeometry(W * 0.72, H * 0.34, D * 0.3)
-    g.translate(0, -H * 0.5, -D * 0.22)
+    g.translate(0, -H * 0.5, -D * 0.36)
     const jawDrop: DeltaFn = () => [0, -H * 1.0, 0]
     group.add(part(g, basis, rot, [{ name: 'jawOpen', delta: jawDrop }], teethMat, 'lowerTeeth'))
   }

@@ -32,8 +32,16 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
     onFrameRef.current = onFrame
   }, [onFrame])
 
+  const startingRef = useRef(false)
   const start = useCallback(async () => {
-    if (!videoRef.current) return
+    // Guard against re-entrancy (double click / auto+manual start): two starts
+    // would open a second webcam stream and a second detection loop, orphaning
+    // the first (camera light stays on, doubled inference).
+    if (!videoRef.current || startingRef.current) return
+    startingRef.current = true
+    // Stop any existing tracker/stream before starting fresh.
+    trackerRef.current?.stop()
+    if (streamRef.current) { stopWebcam(streamRef.current); streamRef.current = null }
     setStatus('loading')
     setError(null)
     try {
@@ -49,6 +57,8 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Tracking failed.')
       setStatus('error')
+    } finally {
+      startingRef.current = false
     }
   }, [])
 

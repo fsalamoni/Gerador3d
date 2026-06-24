@@ -63,10 +63,16 @@ const _pos = new THREE.Vector3()
 const _quat = new THREE.Quaternion()
 const _scale = new THREE.Vector3()
 const _euler = new THREE.Euler()
+const _targetEuler = new THREE.Euler()
 const _target = new THREE.Quaternion()
+const _identity = new THREE.Quaternion()
+const _headTmp = new THREE.Quaternion()
+const _neckTmp = new THREE.Quaternion()
 
-/** Apply the facial transformation matrix to the head & neck bones. */
-function applyHeadPose(vrm: VRM, matrix: number[] | null, lerp: number): void {
+/** Apply the facial transformation matrix to the head & neck bones.
+ * This is the SINGLE owner of VRM head pose — do not also rotate the head/neck
+ * elsewhere (the canvas only rotates the whole root for non-VRM GLBs). */
+export function applyHeadPose(vrm: VRM, matrix: number[] | null, lerp: number): void {
   if (!matrix || matrix.length < 16) return
   const head = vrm.humanoid?.getNormalizedBoneNode('head')
   const neck = vrm.humanoid?.getNormalizedBoneNode('neck')
@@ -76,20 +82,11 @@ function applyHeadPose(vrm: VRM, matrix: number[] | null, lerp: number): void {
   _euler.setFromQuaternion(_quat, 'YXZ')
 
   // Webcam image is mirrored → flip yaw and roll. Dampen the magnitudes so the
-  // avatar's head movement reads naturally.
-  const pitch = _euler.x * 0.6
-  const yaw = -_euler.y * 0.6
-  const roll = -_euler.z * 0.6
+  // avatar's head movement reads naturally. No per-frame allocation.
+  _target.setFromEuler(_targetEuler.set(_euler.x * 0.6, -_euler.y * 0.6, -_euler.z * 0.6, 'YXZ'))
 
-  _target.setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ'))
-
-  if (head) head.quaternion.slerp(splitRotation(_target, 0.7), lerp)
-  if (neck) neck.quaternion.slerp(splitRotation(_target, 0.3), lerp)
-}
-
-const _identity = new THREE.Quaternion()
-function splitRotation(q: THREE.Quaternion, factor: number): THREE.Quaternion {
-  return new THREE.Quaternion().slerpQuaternions(_identity, q, factor)
+  if (head) head.quaternion.slerp(_headTmp.slerpQuaternions(_identity, _target, 0.7), lerp)
+  if (neck) neck.quaternion.slerp(_neckTmp.slerpQuaternions(_identity, _target, 0.3), lerp)
 }
 
 /**
@@ -171,9 +168,7 @@ export function applyFaceToProcedural(
     _matrix.fromArray(frame.matrix)
     _matrix.decompose(_pos, _quat, _scale)
     _euler.setFromQuaternion(_quat, 'YXZ')
-    _target.setFromEuler(
-      new THREE.Euler(_euler.x * 0.6, -_euler.y * 0.6, -_euler.z * 0.6, 'YXZ'),
-    )
+    _target.setFromEuler(_targetEuler.set(_euler.x * 0.6, -_euler.y * 0.6, -_euler.z * 0.6, 'YXZ'))
     head.quaternion.slerp(_target, lerp)
   }
 }

@@ -75,10 +75,16 @@ export default function StudioPage() {
     [jobs],
   )
 
+  // Track the last object URL we created from an uploaded .vrm so we can revoke
+  // it (uploaded VRMs are tens of MB — without this each upload leaks until reload).
+  const lastBlobUrlRef = useRef<string | null>(null)
   function onPickVrm(file: File) {
+    if (lastBlobUrlRef.current) URL.revokeObjectURL(lastBlobUrlRef.current)
     const url = URL.createObjectURL(file)
+    lastBlobUrlRef.current = url
     setSource({ kind: 'vrm', url, label: file.name })
   }
+  useEffect(() => () => { if (lastBlobUrlRef.current) URL.revokeObjectURL(lastBlobUrlRef.current) }, [])
 
   const obsUrl = useMemo(() => {
     if (source.kind === 'none') return '/obs'

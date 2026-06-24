@@ -51,6 +51,9 @@ export class FaceTracker {
   /** Begin the detection loop against a playing <video> element. */
   start(video: HTMLVideoElement, onFrame: FaceFrameHandler): void {
     if (!this.landmarker) throw new Error('FaceTracker not initialized.')
+    // Cancel any prior loop first, so calling start() twice doesn't leave two
+    // requestAnimationFrame loops running on the same tracker.
+    if (this.rafId) cancelAnimationFrame(this.rafId)
     this.running = true
 
     const tick = () => {

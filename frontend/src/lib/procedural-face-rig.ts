@@ -146,6 +146,16 @@ export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks, gain 
   const centroid = meshCentroid(pos)
   if (mouthC.clone().sub(centroid).dot(fwd) < 0) fwd.negate()
 
+  // Reject a degenerate frame: if the eyes/mouth coincide or are collinear, the
+  // normalized basis collapses to (0,0,0) — finite (so not caught by NaN checks)
+  // but it would build garbage silently. Fail with an actionable message.
+  if (right.lengthSq() < 0.25 || up.lengthSq() < 0.25 || fwd.lengthSq() < 0.25) {
+    throw new Error(
+      'Pontos do rosto degenerados (olhos e boca coincidentes/colineares). ' +
+        'Remarque com mais separação entre olhos, cantos da boca e lábios.',
+    )
+  }
+
   // Scales.
   const mouthW = Math.max(1e-5, mouthL.distanceTo(mouthR))
   const mouthH = Math.max(mouthW * 0.18, upLip.distanceTo(loLip))
