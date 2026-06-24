@@ -38,7 +38,8 @@ import { estimateFaceLandmarks } from '../lib/face-landmark-estimate'
 import { buildHair, HAIR_NAME } from '../lib/hair-anatomy'
 import type { CreaturePreset } from '../lib/creature-presets'
 import type { Bounds3 } from '../lib/copilot-client'
-import { exportGlb, exportVrm, type VrmMeta } from '../lib/avatar-export'
+import { convertModelLocal } from '../lib/local-api'
+import { exportGlb, exportVrm, exportObj, exportUsdz, type VrmMeta } from '../lib/avatar-export'
 
 /** A surface point picked by clicking the model, in world + mesh-local space. */
 export interface PickHit {
@@ -75,7 +76,7 @@ export interface AvatarCanvasHandle {
   clearPreview: () => void
   /** Bake the rigged avatar to a downloadable file (.glb keeps the whole model;
    * .vrm wraps the face mesh with a humanoid skeleton + VRM blendshapes). */
-  exportAvatar: (format: 'glb' | 'vrm', meta?: VrmMeta) => Promise<ArrayBuffer>
+  exportAvatar: (format: 'glb' | 'vrm' | 'obj' | 'usdz' | 'fbx', meta?: VrmMeta) => Promise<ArrayBuffer>
   /** Current face-material values (to seed the material editor), or null. */
   getMaterialInfo: () => { color: string; metalness: number; roughness: number } | null
   /** Live-edit the face mesh material (color is a #rrggbb sRGB string). */
@@ -288,6 +289,17 @@ const AvatarCanvas = forwardRef<AvatarCanvasHandle, Props>(function AvatarCanvas
       }
       const root = rootRef.current
       if (!root) return Promise.reject(new Error('Sem modelo para exportar.'))
+      // Export at rest pose for static formats.
+      faceMeshRef.current?.traverse((o) => {
+        const inf = (o as THREE.Mesh).morphTargetInfluences
+        if (inf) inf.fill(0)
+      })
+      if (format === 'obj') return Promise.resolve(exportObj(root))
+      if (format === 'usdz') return exportUsdz(root)
+      if (format === 'fbx') {
+        // FBX/OBJ via the embedded Blender (desktop only): GLB → Blender → FBX.
+        return exportGlb(root).then((glb) => convertModelLocal(glb, 'fbx'))
+      }
       return exportGlb(root)
     },
     getMaterialInfo: () => {

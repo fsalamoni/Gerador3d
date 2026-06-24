@@ -16,6 +16,8 @@
  */
 import * as THREE from 'three'
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
+import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js'
+import { USDZExporter } from 'three/examples/jsm/exporters/USDZExporter.js'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -31,6 +33,18 @@ export function exportGlb(root: THREE.Object3D): Promise<ArrayBuffer> {
       { binary: true, onlyVisible: false, includeCustomExtensions: true },
     )
   })
+}
+
+/** Export the full subtree to Wavefront OBJ (static geometry, no rig/morphs). */
+export function exportObj(root: THREE.Object3D): ArrayBuffer {
+  const text = new OBJExporter().parse(root)
+  return enc.encode(text).buffer as ArrayBuffer
+}
+
+/** Export the full subtree to USDZ (static geometry + materials, no morphs). */
+export async function exportUsdz(root: THREE.Object3D): Promise<ArrayBuffer> {
+  const u8 = await new USDZExporter().parseAsync(root)
+  return (u8.buffer as ArrayBuffer).slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
 }
 
 // VRM0 humanoid layout — fractions of the model's height (Y-up assumed, as the
@@ -115,6 +129,35 @@ function buildSkinned(mesh: THREE.Mesh): { scene: THREE.Object3D; skinned: THREE
   scene.add(skinned)
   skinned.add(bones.hips) // skeleton root lives under the skinned mesh
   skinned.bind(new THREE.Skeleton(order))
+
+  // Carry the generated anatomy (mouth interior with teeth/tongue, eyes, hair)
+  // into the VRM too, so the exported avatar is COMPLETE — not just the face.
+  // Each piece is a rigid child of the head bone (its geometry is offset into the
+  // head-bone's local space), so it follows head pose and its morphs (jawOpen,
+  // tongueOut, eyeBlink) are bound below. Their geometry already shares the face
+  // mesh's local space (the anatomy builders construct in that frame).
+  const headPos = world['head']
+  for (const child of mesh.children) {
+    child.traverse((o) => {
+      const m = o as THREE.Mesh
+      const g = m.isMesh ? (m.geometry as THREE.BufferGeometry) : undefined
+      if (!g?.getAttribute('position')) return
+      const cg = g.clone()
+      cg.translate(-headPos.x, -headPos.y, -headPos.z)
+      if (m.morphTargetDictionary) {
+        cg.userData.targetNames = Object.keys(m.morphTargetDictionary).sort(
+          (a, b) => m.morphTargetDictionary![a] - m.morphTargetDictionary![b],
+        )
+      }
+      const cmat = Array.isArray(m.material) ? m.material[0] : m.material
+      const clone = new THREE.Mesh(cg, (cmat as THREE.Material) ?? new THREE.MeshStandardMaterial())
+      clone.name = `GR3D_Anat_${m.name || 'part'}`
+      if (m.morphTargetDictionary) clone.morphTargetDictionary = { ...m.morphTargetDictionary }
+      if (m.morphTargetInfluences) clone.morphTargetInfluences = m.morphTargetInfluences.slice()
+      bones.head.add(clone)
+    })
+  }
+
   return { scene, skinned }
 }
 
@@ -147,13 +190,13 @@ const VRM_GROUPS: { name: string; preset: string; morphs: string[] }[] = [
  * morphs. Returns the .vrm bytes. All-in-browser, single coordinate space.
  */
 export async function exportVrm(mesh: THREE.Mesh, meta: VrmMeta = {}): Promise<ArrayBuffer> {
-  const { scene, skinned } = buildSkinned(mesh)
+  const { scene } = buildSkinned(mesh)
   const glb = await exportGlb(scene)
-  return injectVrm0(glb, skinned, meta)
+  return injectVrm0(glb, meta)
 }
 
 /** Split a GLB, edit its JSON chunk to add the VRM0 extension, re-pack. */
-function injectVrm0(glb: ArrayBuffer, skinned: THREE.SkinnedMesh, meta: VrmMeta): ArrayBuffer {
+function injectVrm0(glb: ArrayBuffer, meta: VrmMeta): ArrayBuffer {
   const { json, bin } = parseGlb(glb)
 
   // Map our bone/mesh objects to the exporter's node indices (matched by name).
@@ -165,24 +208,25 @@ function injectVrm0(glb: ArrayBuffer, skinned: THREE.SkinnedMesh, meta: VrmMeta)
     .filter((b) => nodeByName.has(b.name))
     .map((b) => ({ bone: b.name, node: nodeByName.get(b.name)!, useDefaultValues: true }))
 
-  // The skinned mesh node + its glTF mesh index, and the morph index lookup.
-  const meshNode = nodeByName.get('GR3D_Avatar')
-  const meshIndex = meshNode != null ? nodes[meshNode]?.mesh ?? 0 : 0
-  const dict = skinned.morphTargetDictionary ?? {}
-  const targetNames: string[] = json.meshes?.[meshIndex]?.primitives?.[0]?.extras?.targetNames ?? []
-  const morphIndex = (name: string): number => {
-    const fromGltf = targetNames.indexOf(name)
-    if (fromGltf >= 0) return fromGltf
-    return name in dict ? dict[name] : -1
-  }
+  // Build morphName → every {glTF mesh, morph index} that has it — across the
+  // face mesh AND the anatomy meshes (teeth/tongue follow jawOpen; eyelids follow
+  // eyeBlink). So a single VRM expression drives all the relevant geometry.
+  const morphTargets = new Map<string, { mesh: number; index: number }[]>()
+  ;(json.meshes ?? []).forEach((m, mi) => {
+    const names: string[] = m.primitives?.[0]?.extras?.targetNames ?? []
+    names.forEach((nm, idx) => {
+      const list = morphTargets.get(nm) ?? []
+      list.push({ mesh: mi, index: idx })
+      morphTargets.set(nm, list)
+    })
+  })
 
   const blendShapeGroups = VRM_GROUPS.map((g) => ({
     name: g.name,
     presetName: g.preset,
-    binds: g.morphs
-      .map((m) => morphIndex(m))
-      .filter((idx) => idx >= 0)
-      .map((idx) => ({ mesh: meshIndex, index: idx, weight: 100 })),
+    binds: g.morphs.flatMap((m) =>
+      (morphTargets.get(m) ?? []).map(({ mesh, index }) => ({ mesh, index, weight: 100 })),
+    ),
     materialValues: [],
     isBinary: false,
   }))

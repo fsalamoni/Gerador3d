@@ -2,6 +2,30 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.5.0 — 2026-06-23 (pipeline completo: gerar → riggar → exportar em todos os formatos)
+
+Foco: o objetivo ponta-a-ponta — gerar o personagem 3D, com rosto detalhado
+(boca/dentes/língua, olhos, sobrancelha/nariz), expressões completas e rig, e
+exportar em todos os formatos.
+
+- **Geração com qualidade por padrão:** se o Hunyuan3D-2mini está instalado, ele
+  passa a ser o backend padrão (geometria muito superior ao TripoSR), e qualquer job
+  ainda em TripoSR é promovido para Hunyuan automaticamente (TripoSR continua de
+  fallback). Desative com `GR3D_NO_AUTO_HUNYUAN=1`.
+- **Rig em 1 clique:** botão **"Riggar tudo automaticamente"** — estima os pontos e
+  cria, de uma vez, as 44 expressões ARKit + interior da boca (dentes/língua) + olhos
+  que fecham. A anatomia passa a vir ligada por padrão.
+- **Exportar em TODOS os formatos:**
+  - **.glb** — completo (rosto + dentes/língua/olhos + 44 morphs).
+  - **.vrm** — AGORA também leva a anatomia (dentes/língua/olhos); os binds de
+    expressão acionam rosto + anatomia juntos (VSeeFace/VTube Studio).
+  - **.obj** e **.usdz** — malha estática completa (sem rig), no navegador.
+  - **.fbx** — via o Blender embutido (desktop): GLB → FBX (Unreal/Maya/Blender).
+- Verificado: smoke test do export (VRM com 15 malhas + binds em rosto+dentes+língua,
+  blink em rosto+pálpebras, OBJ com vértices) + build + py_compile + testes do worker.
+- Honestidade: a conversão FBX (Blender) e a qualidade final do Hunyuan só dá para
+  confirmar na sua GPU/Windows. OBJ/USDZ são malha estática (sem morphs, por formato).
+
 ## 0.4.4 — 2026-06-23 (qualidade da geração 3D: fim do modelo "achatado")
 
 - **Geração 3D saía achatada/disforme** (uma "laje" com a foto colada). Causa: a

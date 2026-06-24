@@ -29,8 +29,8 @@ import importlib.util
 from pathlib import Path
 
 import requests
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -173,6 +173,14 @@ def run_generate(store: Store, job):
     extra_imgs = job["params"].pop("_imageDataUrls", []) or []
     gen_params = job["params"].pop("_genParams", {}) or {}
     backend = job["params"].pop("_backend", "") or current_backend(store.dir)
+    # Qualidade primeiro: se o usuário ainda está no TripoSR (fraco) mas o
+    # Hunyuan3D-2mini está instalado, usa o Hunyuan (geometria muito melhor).
+    # O TripoSR permanece como rede de segurança (fallback abaixo). Desative com
+    # GR3D_NO_AUTO_HUNYUAN=1.
+    if (backend == "triposr" and _hunyuan_installed()
+            and os.environ.get("GR3D_NO_AUTO_HUNYUAN") != "1"):
+        print("[engine] TripoSR -> Hunyuan3D-2mini (melhor qualidade; TripoSR de fallback).", flush=True)
+        backend = "hunyuan-mini"
 
     store.update(jid, status="in_progress", progress=5)
     try:
@@ -755,6 +763,38 @@ def provision_blender(data_dir: Path):
         _pset(active=False, done=True)
 
 
+def convert_model(data_dir: Path, glb_bytes: bytes, to: str) -> bytes:
+    """Converte um GLB para FBX/OBJ usando o Blender embutido (headless)."""
+    blender = resolve_blender(data_dir)
+    if not blender:
+        raise RuntimeError("Blender não encontrado. Instale o rigging em Configuração.")
+    import tempfile
+    tmp = Path(tempfile.gettempdir())
+    stem = tmp / f"gr3d_conv_{uuid.uuid4().hex}"
+    inp = stem.with_suffix(".glb")
+    out = stem.with_suffix("." + to)
+    inp.write_bytes(glb_bytes)
+    script = RIG_DIR / "convert_script.py"
+    try:
+        proc = subprocess.run(
+            [blender, "-b", "-P", str(script), "--",
+             "--in", str(inp), "--out", str(out), "--fmt", to],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            errors="replace", timeout=300,
+        )
+        if not out.exists() or out.stat().st_size == 0:
+            tail = (proc.stdout or "")[-400:]
+            raise RuntimeError(f"Blender não gerou o {to.upper()}. {tail}")
+        return out.read_bytes()
+    finally:
+        for p in (inp, out):
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+
+
 def resolve_blender(data_dir: Path):
     cfg = data_dir / "engine_config.json"
     if cfg.exists():
@@ -789,14 +829,19 @@ def gpu_info_cached():
     return _CUDA_CACHE["gpu"]
 
 
+def _hunyuan_installed() -> bool:
+    """Hunyuan3D-2mini disponível (repo local ou pacote no ambiente)."""
+    return ((GEN_DIR / "Hunyuan3D-2" / "hy3dgen").exists()
+            or importlib.util.find_spec("hy3dgen") is not None)
+
+
 def diagnostics(data_dir: Path):
     blender = resolve_blender(data_dir)
     template = rigmod.find_template()
     torch_ok = importlib.util.find_spec("torch") is not None
     diffusers_ok = importlib.util.find_spec("diffusers") is not None
     triposr_ok = (GEN_DIR / "TripoSR").exists() or importlib.util.find_spec("tsr") is not None
-    hunyuan_ok = ((GEN_DIR / "Hunyuan3D-2" / "hy3dgen").exists()
-                  or importlib.util.find_spec("hy3dgen") is not None)
+    hunyuan_ok = _hunyuan_installed()
     gpu = gpu_info_cached() if torch_ok else {"name": "", "vramGb": 0.0, "cuda": False}
     recommended = genbackends.recommend_backend(gpu.get("vramGb", 0.0))
     return {
@@ -857,6 +902,10 @@ def current_backend(data_dir: Path) -> str:
                 return b
         except Exception:
             pass
+    # Sem escolha salva: usa o MELHOR backend já instalado (Hunyuan3D-2mini gera
+    # geometria muito superior ao TripoSR). TripoSR continua como fallback.
+    if _hunyuan_installed():
+        return "hunyuan-mini"
     return GEN_BACKEND
 
 
@@ -951,6 +1000,19 @@ def create_app(data_dir: Path) -> FastAPI:
     def post_config(body: ConfigBody):
         set_backend(data_dir, body.backend)
         return {"ok": True, "backend": body.backend}
+
+    @app.post("/api/local/convert")
+    def convert(to: str = "fbx", body: bytes = Body(..., media_type="application/octet-stream")):
+        """Converte o GLB enviado (corpo bruto) para FBX/OBJ via Blender."""
+        if to not in ("fbx", "obj"):
+            raise HTTPException(status_code=400, detail="formato não suportado (use fbx ou obj)")
+        if not body:
+            raise HTTPException(status_code=400, detail="GLB vazio")
+        try:
+            data = convert_model(data_dir, body, to)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=str(e)[:300])
+        return Response(content=data, media_type="application/octet-stream")
 
     @app.post("/api/local/rig")
     def rig(body: RigBody):

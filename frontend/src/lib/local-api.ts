@@ -14,6 +14,26 @@ async function asJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
+/**
+ * Convert a GLB to another format via the desktop engine's embedded Blender
+ * (e.g. 'fbx', 'obj'). Sends the GLB bytes, gets the converted file back.
+ * Desktop only — throws a clear error if the engine isn't reachable.
+ */
+export async function convertModelLocal(glb: ArrayBuffer, to: 'fbx' | 'obj'): Promise<ArrayBuffer> {
+  const res = await fetch(`${LOCAL_API}/convert?to=${to}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'model/gltf-binary' },
+    body: glb,
+  })
+  if (!res.ok) {
+    throw new Error(
+      `Conversão para ${to.toUpperCase()} falhou (${res.status}). ` +
+        `Requer o Blender instalado (Configuração). ${await res.text().catch(() => '')}`,
+    )
+  }
+  return res.arrayBuffer()
+}
+
 export async function localGenerate(input: {
   task: TaskKey
   prompt?: string

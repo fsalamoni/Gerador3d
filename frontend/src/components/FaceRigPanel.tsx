@@ -50,8 +50,16 @@ const colorOf = (k: LandmarkKey) => STEPS.find((s) => s.key === k)!.color
 
 type Marks = Partial<Record<LandmarkKey, [number, number, number]>>
 
-function downloadBytes(buf: ArrayBuffer, filename: string): void {
-  const blob = new Blob([buf], { type: 'model/gltf-binary' })
+const EXPORTS: { fmt: 'glb' | 'vrm' | 'fbx' | 'obj' | 'usdz'; label: string; file: string; mime: string; note: string }[] = [
+  { fmt: 'glb', label: '.glb', file: 'avatar.glb', mime: 'model/gltf-binary', note: 'completo (rosto + dentes/língua + olhos + 44 morphs)' },
+  { fmt: 'vrm', label: '.vrm', file: 'avatar.vrm', mime: 'model/gltf-binary', note: 'VTubers (VSeeFace/VTube Studio) — expressões + esqueleto' },
+  { fmt: 'fbx', label: '.fbx', file: 'avatar.fbx', mime: 'application/octet-stream', note: 'Unreal/Maya/Blender — via Blender embutido (desktop)' },
+  { fmt: 'obj', label: '.obj', file: 'avatar.obj', mime: 'text/plain', note: 'malha estática (sem rig)' },
+  { fmt: 'usdz', label: '.usdz', file: 'avatar.usdz', mime: 'model/vnd.usdz+zip', note: 'AR/Apple (sem rig)' },
+]
+
+function downloadBytes(buf: ArrayBuffer, filename: string, mime = 'model/gltf-binary'): void {
+  const blob = new Blob([buf], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -77,12 +85,14 @@ export default function FaceRigPanel({
   const [activeKey, setActiveKey] = useState<LandmarkKey | null>('eyeLeft')
   const [built, setBuilt] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [busy, setBusy] = useState<'' | 'vrm' | 'glb' | 'save'>('')
+  const [busy, setBusy] = useState<'' | 'vrm' | 'glb' | 'fbx' | 'obj' | 'usdz' | 'save'>('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [gain, setGain] = useState(1.5)
-  const [interior, setInterior] = useState(false)
-  const [eyes, setEyes] = useState(false)
+  // Anatomia ligada por padrão: o objetivo é um personagem COMPLETO (boca por
+  // dentro com dentes/língua + olhos que fecham). Cabelo fica opcional.
+  const [interior, setInterior] = useState(true)
+  const [eyes, setEyes] = useState(true)
   const [hair, setHair] = useState(false)
   const [presetId, setPresetId] = useState('human')
   const [mat, setMat] = useState<{ color: string; metalness: number; roughness: number } | null>(null)
@@ -165,6 +175,38 @@ export default function FaceRigPanel({
     [built],
   )
 
+  // ONE-CLICK: estima os pontos e constrói o personagem COMPLETO (expressões +
+  // interior da boca + olhos) direto dos pontos estimados, sem cliques manuais.
+  const autoRigAll = useCallback(() => {
+    const a = avatar.current
+    if (!a) return
+    const lm = a.guessLandmarks()
+    if (!lm) {
+      setError('Não consegui estimar os pontos automaticamente. Marque os 4 pontos com * manualmente.')
+      return
+    }
+    setError(null)
+    try {
+      a.buildFaceRig(lm, gain, {
+        mouth: true,
+        eyes: true,
+        hair,
+        preset: presetById(presetId),
+      })
+      saveLandmarks(modelUrl, lm)
+      setMarks(lm as Marks)
+      setActiveKey(null)
+      setInterior(true)
+      setEyes(true)
+      setBuilt(true)
+      setDirty(false)
+      setSaved(false)
+      onBuilt()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Falha ao riggar automaticamente.')
+    }
+  }, [avatar, gain, hair, presetId, modelUrl, onBuilt])
+
   const reset = useCallback(() => {
     avatar.current?.clearMarkers()
     avatar.current?.clearPreview()
@@ -218,13 +260,14 @@ export default function FaceRigPanel({
     [avatar],
   )
 
-  const downloadFile = useCallback(async (fmt: 'vrm' | 'glb') => {
+  const downloadFile = useCallback(async (fmt: 'vrm' | 'glb' | 'fbx' | 'obj' | 'usdz') => {
     const a = avatar.current
     if (!a) return
+    const spec = EXPORTS.find((e) => e.fmt === fmt)!
     setBusy(fmt)
     setError(null)
     try {
-      downloadBytes(await a.exportAvatar(fmt, AVATAR_META), fmt === 'vrm' ? 'avatar.vrm' : 'avatar-riggado.glb')
+      downloadBytes(await a.exportAvatar(fmt, AVATAR_META), spec.file, spec.mime)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha ao exportar.')
     } finally {
@@ -265,15 +308,25 @@ export default function FaceRigPanel({
       </div>
 
       <p className="text-xs text-slate-300">
-        Gire o modelo (arraste) e clique nos pontos. Errou? Clique de novo na parte
-        na lista para remarcar — sem recomeçar. Funciona em qualquer personagem.
+        Mais rápido: clique em <b className="text-brand-200">"Riggar tudo automaticamente"</b>.
+        Para ajustar, gire o modelo e clique nos pontos da lista.
+      </p>
+
+      <button
+        onClick={autoRigAll}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-500"
+      >
+        <Sparkles className="h-4 w-4" /> Riggar tudo automaticamente
+      </button>
+      <p className="mt-1 text-center text-[10px] text-slate-500">
+        Estima os pontos + cria expressões, interior da boca (dentes/língua) e olhos.
       </p>
 
       <button
         onClick={autoGuess}
-        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-slate-800/40 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800/70"
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-slate-800/40 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800/70"
       >
-        <Wand2 className="h-3.5 w-3.5" /> Estimar pontos automaticamente
+        <Wand2 className="h-3.5 w-3.5" /> Só estimar pontos (ajustar antes de gerar)
       </button>
 
       <CopilotPhotoButton avatar={avatar} onLandmarks={applyCopilotLandmarks} />
@@ -520,35 +573,32 @@ export default function FaceRigPanel({
 
           <VoiceLipSync avatar={avatar} />
 
-          <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Exportar avatar (com expressões)</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={saveToLibrary}
-              disabled={busy !== ''}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-600/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-600/25 disabled:opacity-50"
-            >
-              {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
-              {busy === 'save' ? 'Salvando…' : saved ? 'Salvo!' : 'Salvar na biblioteca'}
-            </button>
-            <button
-              onClick={() => downloadFile('vrm')}
-              disabled={busy !== ''}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-slate-800/40 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800/70 disabled:opacity-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              {busy === 'vrm' ? 'Gerando…' : 'Baixar .vrm'}
-            </button>
-          </div>
+          <p className="mt-4 mb-1.5 text-[11px] uppercase tracking-wider text-slate-500">Exportar avatar (todos os formatos)</p>
           <button
-            onClick={() => downloadFile('glb')}
+            onClick={saveToLibrary}
             disabled={busy !== ''}
-            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-[11px] text-slate-400 transition hover:bg-white/5 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-600/15 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-600/25 disabled:opacity-50"
           >
-            <Download className="h-3 w-3" />
-            {busy === 'glb' ? 'Gerando…' : 'Baixar .glb (com morphs)'}
+            {saved ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+            {busy === 'save' ? 'Salvando…' : saved ? 'Salvo na biblioteca!' : 'Salvar na biblioteca (.vrm)'}
           </button>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {EXPORTS.map((e) => (
+              <button
+                key={e.fmt}
+                onClick={() => downloadFile(e.fmt)}
+                disabled={busy !== ''}
+                title={e.note}
+                className="flex items-center justify-center gap-1 rounded-lg border border-white/10 bg-slate-800/40 px-2 py-2 text-[11px] font-medium text-slate-200 transition hover:bg-slate-800/70 disabled:opacity-50"
+              >
+                <Download className="h-3 w-3" />
+                {busy === e.fmt ? '…' : e.label}
+              </button>
+            ))}
+          </div>
           <p className="mt-1.5 text-[10px] text-slate-500">
-            .vrm com esqueleto + expressões (VSeeFace/VTube Studio) · .glb com morphs ARKit.
+            <b className="text-slate-400">.glb/.fbx</b> = completo (dentes/língua/olhos + expressões). <b className="text-slate-400">.vrm</b> = VTubers.
+            <b className="text-slate-400"> .obj/.usdz</b> = malha estática. .fbx exige o Blender (Configuração).
           </p>
 
           <button
