@@ -2,6 +2,24 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.5.3 — 2026-06-24 (instalação gravável + robustez de app/web)
+
+A correção que faltava + 5ª auditoria (áreas web/app antes não cobertas):
+- **Instalação em pasta GRAVÁVEL (%APPDATA%):** pacotes Python e modelos não vão mais
+  para `resources/` (somente-leitura em Program Files). Resolve "Instalar Geração 3D
+  falha para usuário comum" E "reinstalar após atualizar" (pylibs/repos persistem entre
+  versões). Retrocompatível: instalações existentes continuam detectadas.
+- **Tela branca total evitada:** adicionado *error boundary* — o erro de uma tela não
+  derruba o app inteiro; chunk velho após atualização recarrega sozinho.
+- **Geração sem feedback:** "Gerar" agora mostra **erro claro** se falhar (chave/worker)
+  em vez de só re-habilitar o botão silenciosamente.
+- **Polling infinito:** job travado no servidor não faz mais o navegador consultar para
+  sempre (limite de 10 min); o proxy marca como falho quando o worker "concluiu" sem arquivo.
+- **Vazamento de câmera no OBS:** corrida ao desmontar a tela durante o start agora libera
+  a webcam (luz não fica acesa).
+- **Onboarding** não prende mais o usuário se o save falhar; chaves i18n da Biblioteca
+  faltantes adicionadas (en/pt-BR).
+
 ## 0.5.2 — 2026-06-24 (varredura profunda: 4 auditorias paralelas)
 
 Quatro auditorias adversariais (geração, rig/anatomia, estúdio/memória, shell/pacote).

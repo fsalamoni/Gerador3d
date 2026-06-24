@@ -162,7 +162,13 @@
     "emptyCta": "Generate my first model",
     "download": "Download GLB",
     "openStudio": "Open in Studio",
-    "prepareRig": "Prepare rig"
+    "prepareRig": "Prepare rig",
+    "uploadCta": "Upload model",
+    "uploadModel": "Upload model (.glb/.vrm)",
+    "uploadFailed": "Failed to upload the model.",
+    "delete": "Delete",
+    "confirmDelete": "Are you sure you want to delete this model?",
+    "deleteFailed": "Failed to delete."
   },
   "jobStatus": {
     "pending": "Queued",

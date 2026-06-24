@@ -371,14 +371,21 @@ export const pollJob3d = onCall(async (request) => {
       }
 
       if (workerStatus.status === 'succeeded') {
-        patch.status = 'succeeded'
-        patch.progress = 100
         // The worker uploaded to the path we pre-signed at dispatch; hand back
         // a long-lived signed read URL. Rigging → VRM, generation → GLB.
         const isRigging = (job.params?.taskKey ?? '') === 'rigging'
         const outFile = isRigging ? 'model.vrm' : 'model.glb'
-        const url = await readWorkerOutputUrl(uid, jobId, outFile)
-        patch.outputs = isRigging ? { vrmUrl: url } : { glbUrl: url }
+        try {
+          const url = await readWorkerOutputUrl(uid, jobId, outFile)
+          patch.status = 'succeeded'
+          patch.progress = 100
+          patch.outputs = isRigging ? { vrmUrl: url } : { glbUrl: url }
+        } catch {
+          // Worker said "succeeded" but the output isn't there → terminal FAIL,
+          // not a stuck in_progress that the client polls forever.
+          patch.status = 'failed'
+          patch.error = 'O worker reportou sucesso, mas o arquivo de saída não foi encontrado.'
+        }
       } else if (workerStatus.status === 'failed') {
         patch.status = 'failed'
         patch.error = workerStatus.error || 'Worker processing failed'

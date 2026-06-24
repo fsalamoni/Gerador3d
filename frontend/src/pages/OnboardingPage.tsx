@@ -20,7 +20,13 @@ export default function OnboardingPage() {
   ] as const
 
   async function complete(target: string) {
-    await saveSettings({ onboarding_completed: true })
+    // Navega mesmo se o save falhar (offline/quota): concluir o onboarding não é
+    // crítico — não pode prender um usuário novo na tela.
+    try {
+      await saveSettings({ onboarding_completed: true })
+    } catch {
+      /* segue mesmo assim */
+    }
     navigate(target)
   }
 

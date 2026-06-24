@@ -26,6 +26,11 @@ const TERMINAL = new Set(['succeeded', 'failed', 'canceled'])
  * The effect re-arms only when the *set of active job ids* changes, so ordinary
  * progress updates don't restart the timer.
  */
+/** Stop nudging a job after this long — a job stuck server-side (worker reported
+ * success but never uploaded, provider wedged) must not make the browser hammer
+ * the proxy every 4s forever while the page is open. */
+const MAX_POLL_MS = 10 * 60 * 1000
+
 export function useJobPolling(jobs: GenerationJob[], intervalMs = 4000): void {
   const activeIds = jobs.filter((j) => !TERMINAL.has(j.status)).map((j) => j.id)
   const key = activeIds.slice().sort().join(',')
@@ -35,6 +40,7 @@ export function useJobPolling(jobs: GenerationJob[], intervalMs = 4000): void {
     // store, so there is nothing to nudge here.
     if (IS_LOCAL || !IS_FIREBASE || activeIds.length === 0) return
     let stopped = false
+    const startedAt = Date.now()
 
     const poll = () => {
       for (const id of activeIds) {
@@ -46,7 +52,12 @@ export function useJobPolling(jobs: GenerationJob[], intervalMs = 4000): void {
 
     poll() // immediate nudge so the bar starts moving without a 4s wait
     const timer = setInterval(() => {
-      if (!stopped) poll()
+      if (stopped) return
+      if (Date.now() - startedAt > MAX_POLL_MS) {
+        clearInterval(timer) // give up on a wedged job instead of polling forever
+        return
+      }
+      poll()
     }, intervalMs)
 
     return () => {

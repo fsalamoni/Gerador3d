@@ -162,7 +162,13 @@
     "emptyCta": "Gerar meu primeiro modelo",
     "download": "Baixar GLB",
     "openStudio": "Abrir no Estúdio",
-    "prepareRig": "Preparar rig"
+    "prepareRig": "Preparar rig",
+    "uploadCta": "Enviar modelo",
+    "uploadModel": "Enviar modelo (.glb/.vrm)",
+    "uploadFailed": "Falha ao enviar o modelo.",
+    "delete": "Excluir",
+    "confirmDelete": "Tem certeza que deseja excluir este modelo?",
+    "deleteFailed": "Falha ao excluir."
   },
   "jobStatus": {
     "pending": "Na fila",

@@ -28,6 +28,7 @@ export default function GeneratePage() {
   const [extraImages, setExtraImages] = useState<(string | null)[]>([null, null, null])
   const [pendingSlot, setPendingSlot] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
+  const [genError, setGenError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<GenerationJob | null>(null)
   const [modelId, setModelId] = useState<string>('')
   // Quality preset (local mode) → marching-cubes resolution.
@@ -97,6 +98,7 @@ export default function GeneratePage() {
   async function handleGenerate() {
     if (!IS_LOCAL && !model) return // cloud needs a catalog model; local doesn't
     setBusy(true)
+    setGenError(null)
     try {
       const jobId = await startGeneration({
         task,
@@ -119,6 +121,10 @@ export default function GeneratePage() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
+    } catch (e) {
+      // Sem isto o usuário clicava em "Gerar" e nada acontecia (erro só no console):
+      // chave de provedor faltando, worker fora do ar, provider não configurado, etc.
+      setGenError(e instanceof Error ? e.message : 'Falha ao iniciar a geração.')
     } finally {
       setBusy(false)
     }
@@ -349,6 +355,9 @@ export default function GeneratePage() {
             <Sparkles className="h-4 w-4" />
             {busy ? t('generate.generating') : t('generate.generate')}
           </button>
+          {genError && (
+            <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">{genError}</p>
+          )}
         </div>
 
         {/* Preview / progress */}

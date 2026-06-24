@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { IS_LOCAL } from './lib/runtime'
 import ProtectedRoute from './components/ProtectedRoute'
 import AppLayout from './components/AppLayout'
+import ErrorBoundary from './components/ErrorBoundary'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/auth/LoginPage'
 import RegisterPage from './pages/auth/RegisterPage'
@@ -32,6 +33,7 @@ function LoadingScreen() {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <Suspense fallback={<LoadingScreen />}>
       <AuthProvider>
         <BrowserRouter>
@@ -80,5 +82,6 @@ export default function App() {
         </BrowserRouter>
       </AuthProvider>
     </Suspense>
+    </ErrorBoundary>
   )
 }

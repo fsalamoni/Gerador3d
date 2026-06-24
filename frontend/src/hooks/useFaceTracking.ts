@@ -32,6 +32,15 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
     onFrameRef.current = onFrame
   }, [onFrame])
 
+  // Set on unmount so an in-flight start() can abort and release the camera.
+  const disposedRef = useRef(false)
+  useEffect(() => () => {
+    disposedRef.current = true
+    trackerRef.current?.stop()
+    stopWebcam(streamRef.current)
+    streamRef.current = null
+  }, [])
+
   const startingRef = useRef(false)
   const start = useCallback(async () => {
     // Guard against re-entrancy (double click / auto+manual start): two starts
@@ -48,7 +57,14 @@ export function useFaceTracking(onFrame: (frame: FaceFrame) => void) {
       const tracker = trackerRef.current ?? new FaceTracker()
       trackerRef.current = tracker
       await tracker.init()
-      streamRef.current = await startWebcam(videoRef.current)
+      const stream = await startWebcam(videoRef.current)
+      // Race guard: if the component unmounted while we were awaiting, stop the
+      // stream we just acquired (otherwise the camera light stays on forever).
+      if (disposedRef.current) {
+        stopWebcam(stream)
+        return
+      }
+      streamRef.current = stream
       tracker.start(videoRef.current, (frame) => {
         const stable = stabilizerRef.current.process(frame, performance.now())
         onFrameRef.current(stable)
