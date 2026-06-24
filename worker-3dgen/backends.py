@@ -22,6 +22,27 @@ _MODELS = {}  # cache de modelos carregados por backend
 _REMBG_SESSION = None  # sessão do rembg (remoção de fundo) reutilizada
 
 
+def _validate_mesh(mesh, label="mesh"):
+    """Garante que a malha tem geometria REAL antes de exportar. Sem isso, uma
+    reconstrução vazia/degenerada gera um GLB 'válido porém vazio' que passa como
+    sucesso — exatamente o 'lixo silencioso' que queremos evitar."""
+    try:
+        import numpy as _np
+        nv = len(getattr(mesh, "vertices", []) or [])
+        nf = len(getattr(mesh, "faces", []) or [])
+        if nv < 4 or nf < 1:
+            raise RuntimeError(
+                f"{label}: a reconstrução não gerou geometria (v={nv}, f={nf}). "
+                "Tente outra imagem (rosto frontal, fundo simples) ou outra qualidade.")
+        verts = _np.asarray(mesh.vertices, dtype=_np.float64)
+        if verts.size and not _np.isfinite(verts).all():
+            raise RuntimeError(f"{label}: malha com coordenadas inválidas (NaN/Inf).")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass  # tipo inesperado de mesh — deixa o export decidir
+
+
 def _get_rembg_session():
     """Sessão do rembg reaproveitada. O modelo (u2net) é baixado/cacheado em
     U2NET_HOME (definido pelo motor para uma pasta persistente). Pré-baixado no
@@ -303,8 +324,10 @@ def _triposr(task, prompt, image_path, out_path, progress, params=None):
     try:
         meshes = model.extract_mesh(scene_codes, True, resolution=resolution)
     except TypeError:
-        meshes = model.extract_mesh(scene_codes, resolution=resolution)
+        # API antiga: has_vertex_color é posicional obrigatório — passe-o por nome.
+        meshes = model.extract_mesh(scene_codes, resolution=resolution, has_vertex_color=True)
 
+    _validate_mesh(meshes[0], "triposr")
     if progress:
         progress(88, "exportando GLB")
     meshes[0].export(out_path, file_type="glb")
@@ -411,9 +434,14 @@ def _run_hunyuan(cache_key, default_model, default_subfolder, task, prompt,
     # Multi-view: o modelo Hunyuan3D-2mv aceita um dict de vistas. As imagens
     # extras chegam em params["imagePaths"] na ordem [frontal, traseira, esq, dir].
     views = params.get("imagePaths") or []
-    if cache_key.endswith("-mv") and len(views) > 1:
+    if cache_key.endswith("-mv"):
+        # O modelo multi-view exige um DICT de vistas. Com 1 só imagem, embrulha
+        # como {"front": ...} (passar string crua quebra o MVImageProcessor).
         names = ["front", "back", "left", "right"]
-        image_arg = {names[i]: views[i] for i in range(min(len(views), 4))}
+        if len(views) > 1:
+            image_arg = {names[i]: views[i] for i in range(min(len(views), 4))}
+        else:
+            image_arg = {"front": image_path} if image_path else image_path
     else:
         image_arg = image_path
     call_kwargs = dict(image=image_arg, num_inference_steps=steps,
@@ -427,8 +455,9 @@ def _run_hunyuan(cache_key, default_model, default_subfolder, task, prompt,
     try:
         mesh = pipe(**call_kwargs)[0]
     except TypeError:
-        # API mínima (sem os kwargs de qualidade).
-        mesh = pipe(image=image_path)[0]
+        # API mínima (sem os kwargs de qualidade) — preserva o argumento de imagem
+        # (o dict de vistas no caminho multi-view; não rebaixa para 1 imagem).
+        mesh = pipe(image=image_arg)[0]
 
     # Textura PBR (opt-in): exige o paint pipeline + módulos compilados
     # (custom_rasterizer/differentiable_renderer), que não vêm no caminho de
@@ -441,6 +470,7 @@ def _run_hunyuan(cache_key, default_model, default_subfolder, task, prompt,
             print(f"[backends] textura PBR indisponível ({exc}); exportando geometria.",
                   flush=True)
 
+    _validate_mesh(mesh, cache_key)
     if progress:
         progress(90, "exportando GLB")
     mesh.export(out_path)

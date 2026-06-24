@@ -2,6 +2,42 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.5.2 — 2026-06-24 (varredura profunda: 4 auditorias paralelas)
+
+Quatro auditorias adversariais (geração, rig/anatomia, estúdio/memória, shell/pacote).
+Bom: os medos centrais foram verificados como CORRETOS — olhos fecham, mandíbula abre,
+dentes/língua aparecem. As correções foram em robustez, vazamentos e geração:
+
+Estúdio / memória:
+- Vazamento de GPU a cada troca de modelo (geometrias/materiais/texturas + VRM agora
+  são descartados); marcadores descartados; listener de perda de contexto WebGL.
+- VRM: pose de cabeça/pescoço agora aplicada em UM lugar (corrigido o tremor de pose
+  dupla); sem alocações por frame.
+- Webcam: guarda de re-entrância (não abre 2 streams/loops); blob da .vrm enviada é liberado.
+
+Rig / anatomia:
+- Rejeita frame degenerado (olhos/boca coincidentes/colineares) com erro claro.
+- Dentes recuados para não atravessar lábios finos.
+
+Geração:
+- "Lixo silencioso" eliminado: malha vazia/NaN agora vira erro claro em vez de um GLB
+  vazio marcado como sucesso (TripoSR e Hunyuan).
+- Multi-view do Hunyuan: 1 imagem é embrulhada como {front} (não quebra); fallback
+  preserva o dict de vistas. Corrigido o fallback de extract_mesh do TripoSR.
+- Robustez: watchdog mata processos (pip/Blender) travados; um job de geração por vez
+  (sem disputa de GPU); auto-reparo não roda junto com um provisionamento (sem corromper
+  o ambiente); upload sem nome de arquivo não dá mais 500; run_rig com timeout.
+
+### Conhecidas/abertas (honesto — exigem trabalho dedicado e validação na sua máquina)
+- **Instalação em pasta somente-leitura:** se o app for instalado em Program Files, a
+  instalação da geração pode falhar para usuário comum (grava em resources/). A correção
+  (instalar em %APPDATA%, que também resolve "reinstalar após atualizar") é uma mudança de
+  motor que farei isoladamente, com validação, para não quebrar a geração existente.
+- **Orientação +Z:** auto-estimativa de pontos assume frente = +Z; modelos virados (ex.: VRoid)
+  riggam no lugar errado — use "Só estimar pontos" e ajuste, ou marque manual.
+- **text→3D** depende de diffusers, incompatível com o conjunto travado do TripoSR (image→3D
+  não é afetado).
+
 ## 0.5.1 — 2026-06-24 (varredura: correções de bugs do pipeline)
 
 Auditoria adversarial do pipeline da v0.5.0 + correções verificadas:

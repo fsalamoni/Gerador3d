@@ -208,9 +208,11 @@ def run_generate(store: Store, job):
             image_path=str(image_path) if have_img else "", out_path=str(out),
             progress=prog, params=gen_params,
         )
-        try:
+        # Um job de geração por vez (evita disputa de GPU/_MODELS entre requests).
+        with _GEN_LOCK:
+          try:
             genbackends.generate(backend_name=backend, **gen_kwargs)
-        except Exception as e:  # noqa: BLE001
+          except Exception as e:  # noqa: BLE001
             # Rede de segurança: QUALQUER falha de um backend que não seja o
             # TripoSR (não instalado, módulo compilado que não carrega, ou GPU
             # sem VRAM → "CUDA out of memory") cai para o TripoSR, que roda em
@@ -301,19 +303,27 @@ def run_rig(store: Store, job, source_url: str):
 
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace", bufsize=1, env=env)
+        # Watchdog: um Blender travado prenderia este job em 'in_progress' para
+        # sempre. Mata após 10 min (rig facial leva segundos a ~2 min).
+        rig_timer = threading.Timer(600, lambda: proc.kill() if proc.poll() is None else None)
+        rig_timer.daemon = True
+        rig_timer.start()
         tail = []
-        for raw in proc.stdout:
-            line = raw.rstrip()
-            tail.append(line)
-            if len(tail) > 200:
-                tail.pop(0)
-            if "PROGRESS:" in line:
-                try:
-                    pct = int(line.split("PROGRESS:", 1)[1].strip().split()[0])
-                    store.update(jid, progress=40 + int(max(0, min(100, pct)) * 0.55))
-                except Exception:
-                    pass
-        proc.wait()
+        try:
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                tail.append(line)
+                if len(tail) > 200:
+                    tail.pop(0)
+                if "PROGRESS:" in line:
+                    try:
+                        pct = int(line.split("PROGRESS:", 1)[1].strip().split()[0])
+                        store.update(jid, progress=40 + int(max(0, min(100, pct)) * 0.55))
+                    except Exception:
+                        pass
+            proc.wait()
+        finally:
+            rig_timer.cancel()
         combined = "\n".join(tail)
         # O Blender às vezes retorna 0 mesmo com erro no script; então checamos
         # o RIG_ERROR no log independentemente do código de saída.
@@ -358,6 +368,12 @@ _PLOCK = threading.Lock()
 _CUDA_CACHE = {"checked": False, "value": None}
 _DEPS_HEALED = {"done": False}
 _HEAL_LOCK = threading.Lock()
+# Serializa TODA mutação de ambiente via pip (auto-reparo + provisionamentos), para
+# dois `pip install` não corromperem o site-packages ao rodar concorrentes.
+_INSTALL_LOCK = threading.RLock()
+# Serializa a GERAÇÃO: dois jobs concorrentes disputariam a GPU e o cache _MODELS
+# (OOM / modelo carregado em duplicidade). Um de cada vez.
+_GEN_LOCK = threading.Lock()
 
 TRIPOSR_ZIP = "https://github.com/VAST-AI-Research/TripoSR/archive/refs/heads/main.zip"
 HUNYUAN_ZIP = "https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip"
@@ -384,15 +400,28 @@ def _pset(**kw):
         PROVISION.update(kw)
 
 
-def _run(cmd, cwd=None, env=None, timeout=None):
+def _run(cmd, cwd=None, env=None, timeout=1800):
+    """Roda um comando transmitindo o stdout para o log. Um watchdog mata o
+    processo se ele travar (a iteração de stdout bloqueia até o filho fechar o
+    pipe — sem o watchdog, um download/pip travado prenderia o provisionamento
+    para sempre). Default: 30 min por etapa."""
     _plog("$ " + " ".join(str(c) for c in cmd))
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
-    for raw in proc.stdout:
-        _plog(raw)
-    proc.wait(timeout=timeout) if timeout else proc.wait()
+    timer = None
+    if timeout:
+        timer = threading.Timer(timeout, lambda: proc.kill() if proc.poll() is None else None)
+        timer.daemon = True
+        timer.start()
+    try:
+        for raw in proc.stdout:
+            _plog(raw)
+        proc.wait()
+    finally:
+        if timer:
+            timer.cancel()
     if proc.returncode != 0:
-        raise RuntimeError(f"comando falhou (código {proc.returncode}): {cmd[0]}")
+        raise RuntimeError(f"comando falhou ou expirou (código {proc.returncode}): {cmd[0]}")
 
 
 def _download(url, dest, label=""):
@@ -453,6 +482,10 @@ def ensure_generation_env(data_dir: Path, force=False):
     Isto torna a correção independente de clicar em 'Instalar Geração 3D': o app
     conserta o ambiente sozinho ao iniciar e antes da 1ª geração."""
     if _DEPS_HEALED["done"] and not force:
+        return
+    # Não reparar enquanto um provisionamento (pip) está em curso — dois `pip`
+    # concorrentes corrompem o site-packages. O provision já deixa o ambiente são.
+    if PROVISION.get("active"):
         return
     with _HEAL_LOCK:
         if _DEPS_HEALED["done"] and not force:
@@ -1026,9 +1059,10 @@ def create_app(data_dir: Path) -> FastAPI:
 
     @app.post("/api/local/upload")
     async def upload(file: UploadFile = File(...)):
-        is_vrm = file.filename.lower().endswith(".vrm")
+        fname = file.filename or "model"  # filename pode ser None (parte sem nome)
+        is_vrm = fname.lower().endswith(".vrm")
         task = "upload"
-        job = new_job(task, prompt=f"Upload: {file.filename}")
+        job = new_job(task, prompt=f"Upload: {fname}")
         job_dir = store.assets / job["id"]
         job_dir.mkdir(parents=True, exist_ok=True)
         name = "model.vrm" if is_vrm else "model.glb"
