@@ -38,7 +38,8 @@ export function exportGlb(root: THREE.Object3D): Promise<ArrayBuffer> {
 /** Export the full subtree to Wavefront OBJ (static geometry, no rig/morphs). */
 export function exportObj(root: THREE.Object3D): ArrayBuffer {
   const text = new OBJExporter().parse(root)
-  return enc.encode(text).buffer as ArrayBuffer
+  const u8 = enc.encode(text)
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer
 }
 
 /** Export the full subtree to USDZ (static geometry + materials, no morphs). */
@@ -71,8 +72,9 @@ const BONES: { name: string; y: number; x?: number; parent: string | null }[] = 
   { name: 'rightFoot', y: 0.04, x: -0.06, parent: 'rightLowerLeg' },
 ]
 
-/** Build a SkinnedMesh (mesh skinned 100% to `head`) + humanoid skeleton. */
-function buildSkinned(mesh: THREE.Mesh): { scene: THREE.Object3D; skinned: THREE.SkinnedMesh } {
+/** Build a SkinnedMesh (mesh skinned 100% to `head`) + humanoid skeleton.
+ * Exported for tests; not part of the stable API. */
+export function buildSkinned(mesh: THREE.Mesh): { scene: THREE.Object3D; skinned: THREE.SkinnedMesh } {
   const geo = (mesh.geometry as THREE.BufferGeometry).clone()
   geo.computeBoundingBox()
   const bb = geo.boundingBox!
@@ -128,7 +130,14 @@ function buildSkinned(mesh: THREE.Mesh): { scene: THREE.Object3D; skinned: THREE
   const scene = new THREE.Group()
   scene.add(skinned)
   skinned.add(bones.hips) // skeleton root lives under the skinned mesh
+  // Compute REAL bone world matrices BEFORE building the Skeleton. Otherwise the
+  // inverse-bind matrices are computed from identity matrices → the exported face
+  // is offset by the head position and floats away from the body/anatomy in any
+  // VRM/glTF viewer. (Classic three.js skinning gotcha.)
+  scene.updateMatrixWorld(true)
   skinned.bind(new THREE.Skeleton(order))
+  // Rest pose: never bake a previewed/held expression into the exported defaults.
+  skinned.morphTargetInfluences?.fill(0)
 
   // Carry the generated anatomy (mouth interior with teeth/tongue, eyes, hair)
   // into the VRM too, so the exported avatar is COMPLETE — not just the face.
@@ -153,7 +162,11 @@ function buildSkinned(mesh: THREE.Mesh): { scene: THREE.Object3D; skinned: THREE
       const clone = new THREE.Mesh(cg, (cmat as THREE.Material) ?? new THREE.MeshStandardMaterial())
       clone.name = `GR3D_Anat_${m.name || 'part'}`
       if (m.morphTargetDictionary) clone.morphTargetDictionary = { ...m.morphTargetDictionary }
-      if (m.morphTargetInfluences) clone.morphTargetInfluences = m.morphTargetInfluences.slice()
+      if (m.morphTargetInfluences) {
+        const infl = m.morphTargetInfluences.slice()
+        infl.fill(0) // rest pose for anatomy too
+        clone.morphTargetInfluences = infl
+      }
       bones.head.add(clone)
     })
   }

@@ -111,11 +111,23 @@ export function meshCentroid(pos: THREE.BufferAttribute): THREE.Vector3 {
  * (relative) morph attributes named per {@link GENERATED_SHAPES}, refreshes the
  * mesh's morphTargetDictionary/Influences, and returns the created names.
  */
+/** Above this vertex count, generating 44 morph targets (≈ n×44×3 floats) risks
+ * freezing or OOM-crashing the browser tab. Generated (Hunyuan/TripoSR) meshes can
+ * be very dense, so we refuse with a clear, actionable message instead. */
+export const MAX_RIG_VERTICES = 200_000
+
 export function buildProceduralMorphs(mesh: THREE.Mesh, lm: FaceLandmarks, gain = 1.5): string[] {
   const geo = mesh.geometry as THREE.BufferGeometry
   const pos = geo.getAttribute('position') as THREE.BufferAttribute | undefined
   if (!pos) throw new Error('A malha selecionada não tem vértices (position).')
   const n = pos.count
+  if (n > MAX_RIG_VERTICES) {
+    throw new Error(
+      `Malha muito densa para o rig (${n.toLocaleString('pt-BR')} vértices, máx. ` +
+        `${MAX_RIG_VERTICES.toLocaleString('pt-BR')}). Gere com qualidade menor ` +
+        `(Rápido/Equilibrado) ou simplifique o modelo, depois rigge.`,
+    )
+  }
 
   const eyeL = v(lm.eyeLeft)
   const eyeR = v(lm.eyeRight)

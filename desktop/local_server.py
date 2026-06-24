@@ -172,14 +172,15 @@ def run_generate(store: Store, job):
     img = job["params"].pop("_imageDataUrl", "")
     extra_imgs = job["params"].pop("_imageDataUrls", []) or []
     gen_params = job["params"].pop("_genParams", {}) or {}
-    backend = job["params"].pop("_backend", "") or current_backend(store.dir)
-    # Qualidade primeiro: se o usuário ainda está no TripoSR (fraco) mas o
-    # Hunyuan3D-2mini está instalado, usa o Hunyuan (geometria muito melhor).
-    # O TripoSR permanece como rede de segurança (fallback abaixo). Desative com
-    # GR3D_NO_AUTO_HUNYUAN=1.
-    if (backend == "triposr" and _hunyuan_installed()
+    explicit = job["params"].pop("_backend", "")  # escolha explícita do pedido (ou "")
+    backend = explicit or current_backend(store.dir)
+    # Qualidade primeiro: só quando o backend NÃO foi escolhido explicitamente neste
+    # pedido (ex.: config antiga salva em TripoSR), promove para o Hunyuan3D-2mini se
+    # instalado (geometria muito melhor). Uma escolha explícita de TripoSR é
+    # respeitada. TripoSR continua de fallback. Desative com GR3D_NO_AUTO_HUNYUAN=1.
+    if (not explicit and backend == "triposr" and _hunyuan_installed()
             and os.environ.get("GR3D_NO_AUTO_HUNYUAN") != "1"):
-        print("[engine] TripoSR -> Hunyuan3D-2mini (melhor qualidade; TripoSR de fallback).", flush=True)
+        print("[engine] padrao TripoSR -> Hunyuan3D-2mini (melhor qualidade; TripoSR de fallback).", flush=True)
         backend = "hunyuan-mini"
 
     store.update(jid, status="in_progress", progress=5)
@@ -987,7 +988,9 @@ def create_app(data_dir: Path) -> FastAPI:
         job["params"]["_imageDataUrl"] = body.imageDataUrl  # transiente
         job["params"]["_imageDataUrls"] = body.imageDataUrls or []  # ângulos extras
         job["params"]["_genParams"] = params
-        job["params"]["_backend"] = body.backend or current_backend(data_dir)
+        # Guarda a escolha BRUTA: "" = sem escolha explícita (resolve no run_generate,
+        # que pode promover TripoSR->Hunyuan). Não pré-resolver aqui.
+        job["params"]["_backend"] = body.backend or ""
         store.put(job)
         spawn(run_generate, store, job)
         return {"jobId": job["id"]}

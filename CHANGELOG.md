@@ -2,6 +2,27 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.5.1 — 2026-06-24 (varredura: correções de bugs do pipeline)
+
+Auditoria adversarial do pipeline da v0.5.0 + correções verificadas:
+- **[crítico] VRM com a cabeça deslocada:** as matrizes de bind do esqueleto eram
+  calculadas como identidade (faltava atualizar as matrizes do mundo antes de criar o
+  Skeleton) — o rosto exportado "voava" para fora do corpo. Corrigido; teste prova
+  que a pose de repouso fica correta (`boneMatrixWorld × boneInverse = identidade`).
+- **Export "assava" o preview:** se um botão de teste estivesse ativo, o VRM saía com a
+  expressão congelada. Agora todo export (rosto + anatomia) é zerado para a pose neutra.
+- **Malha densa travava o navegador:** o rig de 1 clique numa malha muito densa
+  (Hunyuan pode gerar centenas de milhares de vértices) podia congelar/estourar a aba.
+  Agora há salvaguarda com erro claro (acima de 200 mil vértices: gere com qualidade
+  menor ou simplifique).
+- **Auto-Hunyuan respeitando a escolha:** a promoção TripoSR→Hunyuan só ocorre quando
+  NÃO há escolha explícita no pedido (corrige a config antiga salva em TripoSR sem
+  ignorar quem escolhe TripoSR de propósito).
+- exportObj agora fatia o buffer corretamente.
+- Limitação honesta ainda aberta: a auto-estimativa de pontos assume a frente = +Z;
+  se o gerador entregar o modelo virado, o rig automático pode cair no lugar errado —
+  use "Só estimar pontos" e ajuste, ou marque manualmente.
+
 ## 0.5.0 — 2026-06-23 (pipeline completo: gerar → riggar → exportar em todos os formatos)
 
 Foco: o objetivo ponta-a-ponta — gerar o personagem 3D, com rosto detalhado
