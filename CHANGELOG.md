@@ -2,6 +2,22 @@
 
 Datas no formato AAAA-MM-DD. "Funciona sem ligar nada" = não precisa de GPU nem chave.
 
+## 0.5.4 — 2026-06-24 (6ª auditoria: rig Blender, worker web, segurança Electron)
+
+Auditadas duas áreas nunca cobertas: o código Blender do rig e o processo Electron.
+- **Rig facial Blender (afeta desktop e web):** os 52 shape keys faciais não vão mais
+  parar no TORSO em modelos segmentados (cabeça+corpo); e o caminho de transferência
+  para malhas de IA agora **nunca grava NaN/Inf** num morph (antes podia corromper o
+  GLB/VRM e o avatar sumia) — peso capado + guarda finita + fallback de delta zero.
+- **Worker de rigging (web):** aceita o `.glb` de fallback (não marca como falho um
+  avatar que funcionou); watchdog (Blender travado não prende o job); erro do script
+  detectado mesmo quando o Blender sai com código 0.
+- **Segurança Electron:** a janela só navega na origem local; links externos só abrem
+  http(s) (nega file:/smb:); sandbox/segurança explícitos; falha de carregamento mostra
+  erro em vez de spinner eterno. (CSP adiado: precisaria de teste no runtime p/ não
+  quebrar o MediaPipe.)
+- Falsos alarmes limpos (auth, providers, build, preload, bind 127.0.0.1, porta dinâmica).
+
 ## 0.5.3 — 2026-06-24 (instalação gravável + robustez de app/web)
 
 A correção que faltava + 5ª auditoria (áreas web/app antes não cobertas):
