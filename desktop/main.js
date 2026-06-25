@@ -162,11 +162,44 @@ async function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, backgroundColor: '#0b1020',
     title: 'Gerador3D', autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, preload: path.join(__dirname, 'preload.js') },
+    // Defaults seguros explícitos (defesa em profundidade): renderer isolado, sem
+    // Node, sandbox ligado, segurança web ligada.
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
   })
+  const ENGINE_ORIGIN = `http://127.0.0.1:${enginePort}`
+  // Só abre links http(s) externos no navegador padrão; nega outros esquemas
+  // (file:, smb:, protocolos custom) que poderiam disparar execução no SO.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    try {
+      if (/^https?:$/.test(new URL(url).protocol)) shell.openExternal(url)
+    } catch (_) { /* url inválida — ignora */ }
     return { action: 'deny' }
+  })
+  // Trava de navegação: a janela privilegiada só navega na origem do motor local;
+  // qualquer tentativa de ir para outra origem abre externo (não dentro do app).
+  win.webContents.on('will-navigate', (e, url) => {
+    try {
+      if (new URL(url).origin !== ENGINE_ORIGIN) {
+        e.preventDefault()
+        if (/^https?:$/.test(new URL(url).protocol)) shell.openExternal(url)
+      }
+    } catch (_) { e.preventDefault() }
+  })
+  // (CSP deliberadamente NÃO definido aqui: o app carrega WASM/modelo do MediaPipe
+  // de CDNs e usa eval/worker; um CSP errado quebraria o rastreamento facial e não
+  // dá para validar fora do runtime real. Fica para um passo dedicado e testado.)
+  // Se a página falhar ao carregar, não deixa a tela presa no spinner em silêncio.
+  win.webContents.on('did-fail-load', (_e, code, desc, validatedURL) => {
+    if (code === -3) return // ABORTED (navegação substituída) — ignora
+    const tail = engineLog.slice(-12).join('\n')
+    dialog.showErrorBox('Falha ao carregar o app',
+      `Não consegui carregar ${validatedURL || ''} (${code} ${desc}).\n\nLog:\n${tail || '(vazio)'}`)
   })
   win.loadFile(path.join(__dirname, 'loading.html'))
 

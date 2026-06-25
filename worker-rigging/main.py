@@ -15,6 +15,7 @@ O processamento real do rigging facial está em rig_script.py (Blender/bpy).
 
 import os
 import sys
+import threading
 import subprocess
 import uuid
 import requests
@@ -198,34 +199,53 @@ def process_rigging(task_id: str, req: RigRequest):
             errors="replace",
             bufsize=1,
         )
+        # Watchdog: um Blender travado prenderia o job em 'in_progress' p/ sempre.
+        rig_timer = threading.Timer(600, lambda: proc.kill() if proc.poll() is None else None)
+        rig_timer.daemon = True
+        rig_timer.start()
         tail = []  # últimas linhas para diagnóstico
-        for raw in proc.stdout:
-            line = raw.rstrip()
-            tail.append(line)
-            if len(tail) > 200:
-                tail.pop(0)
-            print(f"[{task_id}] {line}")
-            if "PROGRESS:" in line:
-                try:
-                    pct = int(line.split("PROGRESS:", 1)[1].strip().split()[0])
-                    # Mapeia 0..100 do rig para a faixa 40..80 do worker.
-                    _set(task_id, progress=40 + int(max(0, min(100, pct)) * 0.4))
-                except Exception:
-                    pass
-        proc.wait()
+        try:
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                tail.append(line)
+                if len(tail) > 200:
+                    tail.pop(0)
+                print(f"[{task_id}] {line}")
+                if "PROGRESS:" in line:
+                    try:
+                        pct = int(line.split("PROGRESS:", 1)[1].strip().split()[0])
+                        # Mapeia 0..100 do rig para a faixa 40..80 do worker.
+                        _set(task_id, progress=40 + int(max(0, min(100, pct)) * 0.4))
+                    except Exception:
+                        pass
+            proc.wait()
+        finally:
+            rig_timer.cancel()
 
+        # RIG_ERROR pode aparecer MESMO com returncode 0 (o Blender às vezes sai 0
+        # com erro no script) — checa sempre, antes do código de saída.
+        rig_err = _extract_error("\n".join(tail))
+        if rig_err:
+            raise RuntimeError(rig_err)
         if proc.returncode != 0:
-            detail = _extract_error("\n".join(tail))
-            raise RuntimeError(detail or f"Blender saiu com código {proc.returncode}.")
+            raise RuntimeError(f"Blender saiu com código {proc.returncode}.")
 
-        if not output_path.exists() or output_path.stat().st_size == 0:
-            raise RuntimeError("Blender terminou mas não gerou o arquivo de saída.")
+        # rig_script tem FALLBACK: se o export VRM falhar (addon ausente etc.), ele
+        # grava um .glb riggado e anuncia "RIG_OUTPUT:". Aceita o .glb como sucesso
+        # em vez de marcar o job como falho (perdíamos um avatar que funcionava).
+        out = output_path
+        if not out.exists() or out.stat().st_size == 0:
+            glb = output_path.with_suffix(".glb")
+            if glb.exists() and glb.stat().st_size > 0:
+                out = glb
+            else:
+                raise RuntimeError("Blender terminou mas não gerou o arquivo de saída.")
         _set(task_id, progress=80)
 
         # 3. Upload do resultado (se houver URL de upload).
         if req.uploadUrl:
-            print(f"[{task_id}] Enviando resultado ({output_path.stat().st_size} bytes)...")
-            with open(output_path, "rb") as f:
+            print(f"[{task_id}] Enviando resultado ({out.stat().st_size} bytes)...")
+            with open(out, "rb") as f:
                 up = requests.put(
                     req.uploadUrl,
                     data=f,
@@ -246,8 +266,8 @@ def process_rigging(task_id: str, req: RigRequest):
         print(f"[{task_id}] Erro: {e}")
         _set(task_id, status="failed", error=str(e)[:500])
     finally:
-        # Limpeza dos arquivos locais.
-        for p in (input_path, output_path):
+        # Limpeza dos arquivos locais (inclui o .glb de fallback).
+        for p in (input_path, output_path, output_path.with_suffix(".glb")):
             try:
                 if p.exists():
                     p.unlink()

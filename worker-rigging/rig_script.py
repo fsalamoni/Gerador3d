@@ -34,6 +34,7 @@ Notas de robustez:
 
 import os
 import sys
+import math
 import argparse
 import traceback
 
@@ -214,7 +215,11 @@ def pick_face_mesh(objects):
     meshes = [o for o in objects if o.type == "MESH" and o.data]
     if not meshes:
         return None
-    keywords = ("face", "head", "rosto", "cabeca", "cabeça", "body", "avatar")
+    # Apenas termos de ROSTO/CABEÇA. "body"/"avatar" foram REMOVIDOS: num GLB
+    # segmentado (cabeça + corpo), uma malha "Body" casava e, por ter mais
+    # vértices, vencia — e os 52 shape keys faciais iam parar no TORSO. Sem termo
+    # de rosto, cai para a maior malha (caso de cabeça única/mesclada).
+    keywords = ("face", "head", "rosto", "cabeca", "cabeça")
     named = [m for m in meshes if any(k in m.name.lower() for k in keywords)]
     pool = named or meshes
     return max(pool, key=lambda m: len(m.data.vertices))
@@ -320,8 +325,11 @@ def transfer_blendshapes_kdtree(user, template, k_neighbors=6):
     for v in user.data.vertices:
         hits = kd.find_n(u_mw @ v.co, k)
         idxs = [idx for (_co, idx, _dist) in hits]
-        raw = [1.0 / (dist + 1e-6) for (_co, _idx, dist) in hits]
-        s = sum(raw) or 1.0
+        # Peso por distância inversa, CAPADO (vértice coincidente daria ~1e6 e
+        # dominaria/estouraria); normalização com guarda finita.
+        raw = [min(1.0 / (dist + 1e-6), 1.0e4) for (_co, _idx, dist) in hits]
+        s = sum(raw)
+        s = s if (math.isfinite(s) and s > 1e-12) else 1.0
         neighbors.append((idxs, [w / s for w in raw]))
 
     transfer_keys = [kb for kb in t_keys.key_blocks if kb.name.lower() != "basis"]
@@ -337,7 +345,12 @@ def transfer_blendshapes_kdtree(user, template, k_neighbors=6):
             d = Vector((0.0, 0.0, 0.0))
             for idx, w in zip(idxs, weights):
                 d += deltas[idx] * w
-            new_key.data[j].co = u_basis.data[j].co + d
+            co = u_basis.data[j].co + d
+            # NUNCA escreve NaN/Inf num morph (corromperia o GLB/VRM → avatar some).
+            # Em caso não-finito, cai para delta zero (a key fica neutra ali).
+            if not (math.isfinite(co.x) and math.isfinite(co.y) and math.isfinite(co.z)):
+                co = u_basis.data[j].co
+            new_key.data[j].co = co
         new_key.value = 0.0
         created.append(kb.name)
     log(f"Transferidas {len(created)} shape keys via KDTree "
